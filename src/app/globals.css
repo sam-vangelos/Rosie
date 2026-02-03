@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #111111;
+  --bg-tertiary: #1a1a1a;
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1a1;
+  --text-muted: #666666;
+  --border-primary: #2a2a2a;
+  --border-secondary: #333333;
+  --accent-blue: #3b82f6;
+  --accent-green: #22c55e;
+  --accent-orange: #f97316;
+  --accent-red: #ef4444;
+  --accent-purple: #a855f7;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Tier badge colors */
+.tier-top {
+  background: linear-gradient(135deg, #22c55e20, #22c55e10);
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.tier-strong {
+  background: linear-gradient(135deg, #3b82f620, #3b82f610);
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.tier-moderate {
+  background: linear-gradient(135deg, #f9731620, #f9731610);
+  border-color: #f97316;
+  color: #f97316;
+}
+
+.tier-below {
+  background: linear-gradient(135deg, #ef444420, #ef444410);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* Progress bar animation */
+@keyframes progress {
+  0% { width: 0%; }
+  100% { width: 100%; }
+}
+
+.animate-progress {
+  animation: progress 2s ease-out forwards;
+}
+
+/* Score ring */
+.score-ring {
+  transform: rotate(-90deg);
+}
