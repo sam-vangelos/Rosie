@@ -1,53 +1,66 @@
 'use client';
 
+import { Check } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
 interface StepIndicatorProps {
   currentStep: number;
   steps: { label: string; description: string }[];
+  onStepClick?: (step: number) => void;
 }
 
-export function StepIndicator({ currentStep, steps }: StepIndicatorProps) {
+export function StepIndicator({ currentStep, steps, onStepClick }: StepIndicatorProps) {
   return (
     <div className="flex items-center gap-2 sm:gap-4">
       {steps.map((step, index) => {
         const stepNumber = index + 1;
         const isActive = stepNumber === currentStep;
         const isCompleted = stepNumber < currentStep;
+        const isClickable = isCompleted && onStepClick;
 
         return (
           <div key={index} className="flex items-center">
-            <div className="flex items-center gap-2">
+            <button
+              onClick={() => isClickable && onStepClick(stepNumber)}
+              disabled={!isClickable}
+              className={cn(
+                'flex items-center gap-2',
+                isClickable ? 'cursor-pointer group' : 'cursor-default',
+              )}
+            >
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
+                className={cn(
+                  'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors',
                   isCompleted
-                    ? 'bg-accent-green text-white'
+                    ? 'bg-tier-top text-white group-hover:bg-tier-top/80'
                     : isActive
-                    ? 'bg-accent-blue text-white'
-                    : 'bg-bg-tertiary text-text-muted'
-                }`}
-              >
-                {isCompleted ? (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  stepNumber
+                    ? 'bg-chart-1 text-white'
+                    : 'bg-muted text-muted-foreground',
                 )}
+              >
+                {isCompleted ? <Check className="size-4" /> : stepNumber}
               </div>
               <div className="hidden sm:block">
                 <p
-                  className={`text-sm font-medium ${
-                    isActive ? 'text-text-primary' : 'text-text-muted'
-                  }`}
+                  className={cn(
+                    'text-sm font-medium transition-colors',
+                    isActive
+                      ? 'text-foreground'
+                      : isCompleted
+                      ? 'text-muted-foreground group-hover:text-foreground'
+                      : 'text-muted-foreground/60',
+                  )}
                 >
                   {step.label}
                 </p>
               </div>
-            </div>
+            </button>
             {index < steps.length - 1 && (
               <div
-                className={`w-8 sm:w-12 h-0.5 mx-2 ${
-                  isCompleted ? 'bg-accent-green' : 'bg-bg-tertiary'
-                }`}
+                className={cn(
+                  'w-8 sm:w-12 h-0.5 mx-2',
+                  isCompleted ? 'bg-tier-top' : 'bg-muted',
+                )}
               />
             )}
           </div>

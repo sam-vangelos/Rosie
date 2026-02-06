@@ -20,34 +20,23 @@ export function ScoreRing({ score, tier, size = 'md' }: ScoreRingProps) {
   const circumference = 2 * Math.PI * radius;
   const progress = (score / 10) * circumference;
 
-  const tierColors = {
-    top: '#22c55e',
-    strong: '#3b82f6',
-    moderate: '#f97316',
-    below: '#ef4444',
-  };
-
-  const color = tierColors[tier];
-
   return (
     <div className="relative" style={{ width: config.width, height: config.width }}>
       <svg className="score-ring" width={config.width} height={config.width}>
-        {/* Background circle */}
         <circle
           cx={config.width / 2}
           cy={config.width / 2}
           r={radius}
           fill="none"
-          stroke="#2a2a2a"
+          className="stroke-border"
           strokeWidth={config.stroke}
         />
-        {/* Progress circle */}
         <circle
           cx={config.width / 2}
           cy={config.width / 2}
           r={radius}
           fill="none"
-          stroke={color}
+          className={`stroke-tier-${tier}`}
           strokeWidth={config.stroke}
           strokeLinecap="round"
           strokeDasharray={circumference}
@@ -56,8 +45,7 @@ export function ScoreRing({ score, tier, size = 'md' }: ScoreRingProps) {
         />
       </svg>
       <div
-        className={`absolute inset-0 flex items-center justify-center font-bold ${config.fontSize}`}
-        style={{ color }}
+        className={`absolute inset-0 flex items-center justify-center font-bold ${config.fontSize} text-tier-${tier}`}
       >
         {score.toFixed(1)}
       </div>

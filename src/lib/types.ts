@@ -9,6 +9,8 @@ export interface CandidateScore {
 
 export interface Candidate {
   id: string;
+  greenhouseId?: number;
+  greenhouseUrl?: string;
   name: string;
   email: string;
   currentRole: string;
@@ -20,6 +22,11 @@ export interface Candidate {
   strengths: string[];
   gaps: string[];
   reasoning: string;
+  resumeFilename?: string;
+  applicationStatus?: string;
+  currentStage?: string;
+  appliedAt?: string;
+  source?: string;
 }
 
 export interface RubricItem {
@@ -45,8 +52,20 @@ export interface ScreeningSession {
   jobTitle: string;
   jobDescription: string;
   intakeNotes: string;
+  greenhouseJobId?: number;
   rubric: ScoringRubric | null;
   idealPatterns: IdealPatterns | null;
   candidates: Candidate[];
   status: 'setup' | 'calibrating' | 'scoring' | 'results';
+}
+
+// Greenhouse job for the job selector
+export interface GreenhouseJob {
+  id: number;
+  name: string;
+  status: string;
+  department: string;
+  office: string;
+  openings: number;
+  opened_at: string;
 }

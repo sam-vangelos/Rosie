@@ -3,6 +3,9 @@
 import { Candidate, Tier } from '@/lib/types';
 import { CandidateCard } from './CandidateCard';
 import { useState } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 
 interface TierSectionProps {
   tier: Tier;
@@ -11,6 +14,7 @@ interface TierSectionProps {
   onToggleSelect: (id: string) => void;
   onSelectAll: (ids: string[]) => void;
   onAction: (action: 'advance' | 'reject', ids: string[]) => void;
+  globalRankMap?: Map<string, number>;
 }
 
 const tierConfig = {
@@ -18,28 +22,24 @@ const tierConfig = {
     label: 'Top Tier',
     scoreRange: '9.0 - 10',
     description: 'Exceptional match for the role',
-    color: 'accent-green',
     action: 'Advance All to Screen',
   },
   strong: {
     label: 'Strong',
     scoreRange: '8.0 - 8.9',
     description: 'Strong candidates worth reviewing',
-    color: 'accent-blue',
     action: 'Review Individually',
   },
   moderate: {
     label: 'Moderate',
     scoreRange: '7.0 - 7.9',
     description: 'Some gaps but potential fit',
-    color: 'accent-orange',
     action: 'Review or Reject',
   },
   below: {
     label: 'Below Threshold',
     scoreRange: '< 7.0',
     description: 'Does not meet minimum requirements',
-    color: 'accent-red',
     action: 'Bulk Reject',
   },
 };
@@ -51,6 +51,7 @@ export function TierSection({
   onToggleSelect,
   onSelectAll,
   onAction,
+  globalRankMap,
 }: TierSectionProps) {
   const [collapsed, setCollapsed] = useState(tier === 'below');
   const config = tierConfig[tier];
@@ -67,57 +68,62 @@ export function TierSection({
           onClick={() => setCollapsed(!collapsed)}
           className="flex items-center gap-3 group"
         >
-          <svg
-            className={`w-4 h-4 text-text-muted transition-transform ${collapsed ? '' : 'rotate-90'}`}
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
+          <ChevronRight
+            className={cn(
+              'size-4 text-muted-foreground transition-transform',
+              !collapsed && 'rotate-90',
+            )}
+          />
           <div className="flex items-center gap-2">
-            <div className={`w-3 h-3 rounded-full bg-${config.color}`} style={{ backgroundColor: `var(--${config.color})` }} />
-            <h2 className="text-lg font-semibold text-text-primary group-hover:text-text-secondary transition-colors">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ backgroundColor: `var(--tier-${tier})` }}
+            />
+            <h2 className="text-lg font-semibold text-foreground group-hover:text-muted-foreground transition-colors">
               {config.label}
             </h2>
-            <span className="text-sm text-text-muted">({config.scoreRange})</span>
+            <span className="text-sm text-muted-foreground">({config.scoreRange})</span>
           </div>
-          <span className="text-sm text-text-muted">{candidates.length} candidates</span>
+          <span className="text-sm text-muted-foreground">{candidates.length} candidates</span>
         </button>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => onSelectAll(allSelected ? [] : tierCandidateIds)}
-            className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             {allSelected ? 'Deselect All' : 'Select All'}
           </button>
           {tier === 'top' && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => onAction('advance', tierCandidateIds)}
-              className="px-3 py-1.5 text-sm font-medium rounded-md bg-accent-green/10 text-accent-green hover:bg-accent-green/20 transition-colors"
+              className="text-tier-top hover:text-tier-top hover:bg-tier-top/10"
             >
               {config.action}
-            </button>
+            </Button>
           )}
           {tier === 'below' && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => onAction('reject', tierCandidateIds)}
-              className="px-3 py-1.5 text-sm font-medium rounded-md bg-accent-red/10 text-accent-red hover:bg-accent-red/20 transition-colors"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
             >
               {config.action}
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       {!collapsed && (
         <div className="space-y-2 pl-7">
-          {candidates.map((candidate, index) => (
+          {candidates.map((candidate) => (
             <CandidateCard
               key={candidate.id}
               candidate={candidate}
-              rank={index + 1}
+              rank={globalRankMap?.get(candidate.id) || 0}
               selected={selectedIds.has(candidate.id)}
               onSelect={onToggleSelect}
             />
