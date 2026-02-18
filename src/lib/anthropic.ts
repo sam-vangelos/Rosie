@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ScoringRubric, IdealPatterns, CandidateScore } from './types';
+import { ScoringRubric, IdealPatterns, CriterionScore } from './types';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY!,
@@ -42,7 +42,6 @@ async function withRetry<T>(
 // ---- JSON extraction (handles markdown code blocks, nested objects) ----
 
 function extractJSON(text: string, label: string): unknown {
-  // Try direct JSON.parse first (cleanest case)
   const trimmed = text.trim();
   if (trimmed.startsWith('{')) {
     try {
@@ -50,7 +49,6 @@ function extractJSON(text: string, label: string): unknown {
     } catch { /* fall through */ }
   }
 
-  // Strip markdown code fences
   const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (codeBlockMatch) {
     try {
@@ -58,7 +56,6 @@ function extractJSON(text: string, label: string): unknown {
     } catch { /* fall through */ }
   }
 
-  // Find the outermost balanced braces
   const start = text.indexOf('{');
   if (start === -1) throw new Error(`No JSON object found in ${label} response`);
 
@@ -97,7 +94,7 @@ export async function generateRubric(
       messages: [
         {
           role: 'user',
-          content: `You are an expert technical recruiter building a candidate scoring rubric. Analyze the job description and hiring manager intake notes below, then generate a structured scoring rubric.
+          content: `You are an expert technical recruiter designing a discriminative scoring instrument. Your goal is NOT to restate the job description — the recruiter already knows the role. Your goal is to identify the 3-5 signals that separate the top 5% of candidates from the other 95%.
 
 ## Job Description
 ${jobDescription}
@@ -105,29 +102,55 @@ ${jobDescription}
 ## Intake Notes
 ${intakeNotes || 'No intake notes provided.'}
 
-## Instructions
-Generate a JSON scoring rubric with these sections:
+## Your Task
 
-1. **mustHaves**: Critical requirements. Each has a "requirement" (string), "weight" (number 1-30, all weights across mustHaves + niceToHaves should sum to 100), and optional "flexibility" (string describing acceptable alternatives).
+Analyze this role and produce a scoring rubric with two parts:
 
-2. **niceToHaves**: Preferred but not required qualifications. Same structure as mustHaves but typically lower weights.
+### Part 1: Discriminative Criteria (3-5 criteria)
 
-3. **hiddenPreferences**: Implicit preferences extracted from intake notes that aren't in the formal JD. Each has "preference" (string) and "source" (string describing where you inferred it from).
+Each criterion must represent a dimension where candidates will MEANINGFULLY DIFFER. These are NOT generic categories like "technical skills" or "experience level" — they are specific, role-relevant signals.
 
-4. **seniorityTarget**: A string describing the target seniority level and years range.
+For example, for an "RL Gym Engineer" role, instead of one "RL experience" bucket, you'd create separate criteria for:
+- RL environment design (built gyms from scratch vs. used existing ones)
+- Reward function engineering (designed reward functions vs. applied standard ones)
+- Agent architecture (built autonomous agents vs. fine-tuned existing models)
 
-Rules:
-- Weights across all mustHaves and niceToHaves should sum to 100
-- Extract genuine signals from the intake notes, not just restate the JD
-- Be specific about what "good" looks like for each requirement
-- Flag any tension between JD requirements and intake note preferences
+Each criterion needs:
+- **id**: Short kebab-case identifier (e.g., "rl-env-design")
+- **name**: Human-readable name (e.g., "RL Environment Design & Architecture")
+- **description**: What this criterion measures and why it's discriminative
+- **weight**: How much this criterion matters relative to others (all weights must sum to 100)
+- **scoringGuide**: Concrete descriptions of what each score range looks like:
+  - **high** (9-10): What the top 5% of candidates look like on this dimension
+  - **mid** (6-8): What an adequate candidate looks like
+  - **low** (1-5): What a weak or missing signal looks like
+
+Rules for criteria:
+- Each criterion should produce a SPREAD of scores across a typical applicant pool. If 80% of applicants would score the same, it's not discriminative.
+- Split broad categories into meaningful sub-specializations when they exist.
+- Weight the criteria by their importance to THIS specific role, not generic importance.
+- Include signals from intake notes that aren't in the JD.
+
+### Part 2: Table Stakes (skills NOT scored)
+
+List skills that are baseline requirements but have NO discriminative value for this role. These are skills that any qualified candidate would have — scoring them just adds noise. Examples: Python/SQL for a data science role, Git for any engineering role, "communication skills" for any role.
 
 Respond with ONLY valid JSON matching this schema:
 {
-  "mustHaves": [{ "requirement": string, "weight": number, "flexibility": string? }],
-  "niceToHaves": [{ "requirement": string, "weight": number }],
-  "hiddenPreferences": [{ "preference": string, "source": string }],
-  "seniorityTarget": string
+  "criteria": [
+    {
+      "id": string,
+      "name": string,
+      "description": string,
+      "weight": number,
+      "scoringGuide": {
+        "high": string,
+        "mid": string,
+        "low": string
+      }
+    }
+  ],
+  "tableStakes": [string]
 }`,
         },
       ],
@@ -136,6 +159,72 @@ Respond with ONLY valid JSON matching this schema:
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     return extractJSON(text, 'rubric') as ScoringRubric;
   }, 'generateRubric');
+}
+
+// ---- Calibrate Rubric with Ideal Candidate Patterns ----
+
+export async function calibrateRubric(
+  rubric: ScoringRubric,
+  idealPatterns: IdealPatterns,
+  jobDescription: string
+): Promise<ScoringRubric> {
+  return withRetry(async () => {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: `You are refining a scoring rubric based on patterns extracted from exemplar resumes (the recruiter's best hires or top candidates for similar roles).
+
+## Current Rubric
+${JSON.stringify(rubric, null, 2)}
+
+## Patterns from Exemplar Resumes
+${JSON.stringify(idealPatterns, null, 2)}
+
+## Job Description (for context)
+${jobDescription}
+
+## Your Task
+
+The exemplar resumes reveal what "great" actually looks like for this role. Use these patterns to sharpen the rubric:
+
+1. **Adjust scoring guides**: Update the high/mid/low descriptions in each criterion to reflect what the exemplar candidates actually demonstrated. Be specific — reference the actual skills, trajectories, and achievements from the exemplars.
+
+2. **Adjust weights**: If the exemplars reveal that certain criteria matter more (or less) than the initial rubric assumed, adjust weights. Weights must still sum to 100.
+
+3. **Add/remove criteria**: If the exemplars reveal a discriminative signal not captured by the current criteria, add it (and remove a less useful one to stay at 3-5 total). If a current criterion doesn't actually discriminate given what the exemplars show, remove it.
+
+4. **Update table stakes**: If the exemplars reveal that a currently-scored criterion is actually table stakes (all exemplars have it, so it doesn't discriminate), move it to table stakes.
+
+5. **Write a calibration summary**: A plain-English explanation (2-4 sentences) of how the exemplar resumes shifted the scoring model. This is shown to the recruiter so they understand what changed. Example: "Based on your 3 exemplar resumes, the model will prioritize candidates who progressed from ML research into applied RL infrastructure, with particular weight on frontier lab experience. Candidates with pure SWE backgrounds but no RL research exposure will score significantly lower."
+
+Respond with ONLY valid JSON matching this schema:
+{
+  "criteria": [
+    {
+      "id": string,
+      "name": string,
+      "description": string,
+      "weight": number,
+      "scoringGuide": {
+        "high": string,
+        "mid": string,
+        "low": string
+      }
+    }
+  ],
+  "tableStakes": [string],
+  "calibrationSummary": string
+}`,
+        },
+      ],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    return extractJSON(text, 'calibrateRubric') as ScoringRubric;
+  }, 'calibrateRubric');
 }
 
 // ---- Pattern Extraction from Ideal Resumes ----
@@ -190,8 +279,7 @@ Respond with ONLY valid JSON matching this schema:
 // ---- Candidate Scoring ----
 
 export interface ScoringResult {
-  scores: CandidateScore;
-  overallScore: number;
+  criterionScores: CriterionScore[];
   strengths: string[];
   gaps: string[];
   reasoning: string;
@@ -206,7 +294,6 @@ export async function scoreCandidate(
   resumeMimeType: string
 ): Promise<ScoringResult> {
   return withRetry(async () => {
-    // Build the content array
     const content: Anthropic.MessageCreateParams['messages'][0]['content'] = [];
 
     // Add the resume - prefer PDF document block, fall back to text
@@ -225,49 +312,61 @@ export async function scoreCandidate(
         text: `## Candidate Resume\n${resumeText}`,
       });
     } else {
-      // No resume available - score based on minimal info
       content.push({
         type: 'text',
         text: `## Candidate: ${candidateName}\nNo resume available for this candidate.`,
       });
     }
 
-    // Add the scoring prompt
+    // Build the criteria scoring instructions
+    const criteriaInstructions = rubric.criteria
+      .map((c, i) => `${i + 1}. **${c.name}** (id: "${c.id}", weight: ${c.weight}%)
+   - ${c.description}
+   - 9-10: ${c.scoringGuide.high}
+   - 6-8: ${c.scoringGuide.mid}
+   - 1-5: ${c.scoringGuide.low}`)
+      .join('\n\n');
+
     const patternsSection = idealPatterns
-      ? `\n## Ideal Candidate Patterns (from top performers in similar roles)\n${JSON.stringify(idealPatterns, null, 2)}\n\nUse these patterns as additional signal when scoring. Candidates matching these patterns should receive a boost.`
+      ? `\n## Calibration Patterns (from top performers in similar roles)\n${JSON.stringify(idealPatterns, null, 2)}\n\nCandidates matching these patterns should receive a scoring boost on relevant criteria.`
       : '';
 
     content.push({
       type: 'text',
-      text: `You are an expert technical recruiter scoring a candidate against a role-specific rubric. Be rigorous, fair, and evidence-based.
+      text: `You are scoring a candidate against specific discriminative criteria. Be rigorous and evidence-based.
 
-## Scoring Rubric
-${JSON.stringify(rubric, null, 2)}
+## Scoring Criteria
+${criteriaInstructions}
 ${patternsSection}
 
-## Scoring Dimensions
-Score each dimension 0-10 (one decimal place). Be calibrated: 10 = exceptional/rare, 8-9 = strong, 6-7 = adequate, 4-5 = weak, below 4 = significant gaps.
+## Table Stakes (NOT scored — assumed baseline)
+${rubric.tableStakes.length > 0 ? rubric.tableStakes.join(', ') : 'None specified'}
 
-1. **technical**: How well do their technical skills match the must-have and nice-to-have requirements? Weight this by the rubric weights.
-2. **experience**: Depth and relevance of work experience. Consider years, company types, role scope, and progression.
-3. **alignment**: Fit with the hidden preferences and cultural signals from intake notes. Startup mentality, communication, autonomy, etc.
-4. **growth**: Career trajectory and potential. Are they on an upward path? Could they grow into a leadership role?
+## Instructions
 
-The **overallScore** should be a weighted average where technical and experience are weighted more heavily (based on rubric weights), not a simple average.
+Score this candidate on EACH criterion individually (0-10, one decimal place). For each criterion:
+- Extract SPECIFIC evidence from the resume that supports your score
+- Use the scoring guide ranges: 9-10 = exceptional, 6-8 = adequate, 1-5 = weak/missing
+- If no evidence exists for a criterion, score 3-4 (not 5-6 — absence of evidence is a real signal for discriminative criteria)
+- Do NOT score table-stakes skills — they are not part of the evaluation
 
-## Rules
+Also provide:
+- **strengths**: 2-4 specific strengths citing actual resume content
+- **gaps**: 1-3 specific gaps or missing signals
+- **reasoning**: 2-3 sentence overall assessment
+
+Rules:
 - Base scores ONLY on evidence in the resume. Do not assume skills that aren't demonstrated.
-- If information is missing, score that dimension conservatively (5-6 range).
-- Be specific in strengths and gaps - cite actual resume content.
-- Reasoning should be 2-3 sentences explaining the overall assessment.
-- Do NOT penalize for demographics, school prestige, or company brand. Score on demonstrated skills and experience.
+- Be specific in evidence — cite job titles, companies, projects, technologies, or achievements from the resume.
+- Do NOT penalize for demographics, school prestige, or company brand.
 
 Respond with ONLY valid JSON:
 {
-  "scores": { "technical": number, "experience": number, "alignment": number, "growth": number },
-  "overallScore": number,
-  "strengths": [string, string, ...],
-  "gaps": [string, string, ...],
+  "criterionScores": [
+    { "criterionId": string, "score": number, "evidence": string }
+  ],
+  "strengths": [string],
+  "gaps": [string],
   "reasoning": string
 }`,
     });
@@ -281,20 +380,18 @@ Respond with ONLY valid JSON:
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
     const result = extractJSON(text, `scoring:${candidateName}`) as ScoringResult;
 
-    // Validate required fields
-    if (!result.scores || typeof result.overallScore !== 'number') {
-      throw new Error(`Invalid scoring response for ${candidateName}: missing required fields`);
+    // Validate
+    if (!Array.isArray(result.criterionScores) || result.criterionScores.length === 0) {
+      throw new Error(`Invalid scoring response for ${candidateName}: missing criterionScores`);
     }
 
-    // Clamp scores to 0-10 range and round to 1 decimal
+    // Clamp scores to 0-10 and round to 1 decimal
     const clampAndRound = (v: number) => Math.round(Math.min(10, Math.max(0, v)) * 10) / 10;
-    result.scores.technical = clampAndRound(result.scores.technical);
-    result.scores.experience = clampAndRound(result.scores.experience);
-    result.scores.alignment = clampAndRound(result.scores.alignment);
-    result.scores.growth = clampAndRound(result.scores.growth);
-    result.overallScore = clampAndRound(result.overallScore);
+    for (const cs of result.criterionScores) {
+      cs.score = clampAndRound(cs.score);
+      cs.evidence = cs.evidence || '';
+    }
 
-    // Ensure arrays exist
     result.strengths = result.strengths || [];
     result.gaps = result.gaps || [];
     result.reasoning = result.reasoning || '';
@@ -303,3 +400,24 @@ Respond with ONLY valid JSON:
   }, `scoreCandidate:${candidateName}`);
 }
 
+// ---- Compute weighted overall score (deterministic, in code) ----
+
+export function computeOverallScore(
+  criterionScores: CriterionScore[],
+  rubric: ScoringRubric
+): number {
+  let weightedSum = 0;
+  let totalWeight = 0;
+
+  for (const cs of criterionScores) {
+    const criterion = rubric.criteria.find((c) => c.id === cs.criterionId);
+    const weight = criterion?.weight ?? 0;
+    weightedSum += cs.score * weight;
+    totalWeight += weight;
+  }
+
+  if (totalWeight === 0) return 0;
+
+  const score = weightedSum / totalWeight;
+  return Math.round(Math.min(10, Math.max(0, score)) * 10) / 10;
+}

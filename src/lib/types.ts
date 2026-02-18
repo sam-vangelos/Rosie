@@ -1,10 +1,37 @@
 export type Tier = 'top' | 'strong' | 'moderate' | 'below';
 
-export interface CandidateScore {
-  technical: number;
-  experience: number;
-  alignment: number;
-  growth: number;
+// ---- Discriminative Scoring Model ----
+
+/** A single discriminative criterion that separates top candidates from the rest */
+export interface DiscriminativeCriterion {
+  id: string;
+  name: string;
+  description: string;
+  weight: number; // 0-100, all criteria weights sum to 100
+  scoringGuide: {
+    high: string;   // 9-10: what excellence looks like
+    mid: string;    // 6-8: what adequate looks like
+    low: string;    // 1-5: what a gap looks like
+  };
+}
+
+/** The scoring rubric — 3-5 discriminative criteria + table-stakes (not scored) */
+export interface ScoringRubric {
+  criteria: DiscriminativeCriterion[];
+  tableStakes: string[];
+  calibrationSummary?: string;
+}
+
+/** Per-criterion score with evidence extracted from the resume */
+export interface CriterionScore {
+  criterionId: string;
+  score: number; // 0-10, one decimal
+  evidence: string; // specific resume evidence supporting this score
+}
+
+/** All scores for a candidate — overallScore computed in code, not by Claude */
+export interface CandidateScores {
+  criterionScores: CriterionScore[];
 }
 
 export interface Candidate {
@@ -16,7 +43,7 @@ export interface Candidate {
   currentRole: string;
   currentCompany: string;
   yearsExperience: number;
-  scores: CandidateScore;
+  scores: CandidateScores;
   overallScore: number;
   tier: Tier;
   strengths: string[];
@@ -29,24 +56,15 @@ export interface Candidate {
   source?: string;
 }
 
-export interface RubricItem {
-  requirement: string;
-  weight: number;
-  flexibility?: string;
-}
-
-export interface ScoringRubric {
-  mustHaves: RubricItem[];
-  niceToHaves: RubricItem[];
-  hiddenPreferences: { preference: string; source: string }[];
-  seniorityTarget: string;
-}
+// ---- Calibration Patterns (unchanged) ----
 
 export interface IdealPatterns {
   commonSkills: { skill: string; frequency: 'all' | 'most' | 'some' }[];
   careerPatterns: { pattern: string; frequency: 'all' | 'most' | 'some' }[];
   achievementSignals: { signal: string; examples: string[] }[];
 }
+
+// ---- Session ----
 
 export interface ScreeningSession {
   jobTitle: string;

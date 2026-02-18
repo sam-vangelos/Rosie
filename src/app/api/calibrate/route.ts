@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { extractPatterns } from '@/lib/anthropic';
+import { extractPatterns, calibrateRubric } from '@/lib/anthropic';
 import mammoth from 'mammoth';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const pdfParse = require('pdf-parse/lib/pdf-parse');
@@ -10,6 +10,8 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const files = formData.getAll('resumes') as File[];
+    const rubricJson = formData.get('rubric') as string | null;
+    const jobDescription = formData.get('jobDescription') as string | null;
 
     if (files.length === 0) {
       return NextResponse.json({ error: 'No resume files provided' }, { status: 400 });
@@ -80,13 +82,25 @@ export async function POST(request: Request) {
       );
     }
 
-    // Extract patterns from the ideal resumes (this is the only Claude call)
+    // Step 1: Extract patterns from ideal resumes
     const patterns = await extractPatterns(resumeTexts);
+    console.log(`[calibrate] Patterns extracted. ${patterns.commonSkills.length} skills, ${patterns.careerPatterns.length} patterns`);
 
-    console.log(`[calibrate] Done. ${patterns.commonSkills.length} skills, ${patterns.careerPatterns.length} patterns`);
+    // Step 2: If rubric was provided, calibrate it with the extracted patterns
+    let calibratedRubric = null;
+    if (rubricJson && jobDescription) {
+      try {
+        const rubric = JSON.parse(rubricJson);
+        calibratedRubric = await calibrateRubric(rubric, patterns, jobDescription);
+        console.log(`[calibrate] Rubric calibrated. Summary: ${calibratedRubric.calibrationSummary?.slice(0, 100)}...`);
+      } catch (err) {
+        console.error('[calibrate] Rubric calibration failed, returning uncalibrated:', err);
+      }
+    }
 
     return NextResponse.json({
       patterns,
+      calibratedRubric,
       filesProcessed: processedFiles,
       totalFiles: files.length,
     });

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { scoreCandidate } from '@/lib/anthropic';
+import { scoreCandidate, computeOverallScore } from '@/lib/anthropic';
 import { ScoringRubric, IdealPatterns, Tier } from '@/lib/types';
 
 export const maxDuration = 300;
@@ -50,7 +50,9 @@ export async function POST(request: Request) {
       candidate.resumeMimeType || 'application/pdf'
     );
 
-    const tier = assignTier(result.overallScore);
+    // Compute weighted average in code — deterministic, reproducible
+    const overallScore = computeOverallScore(result.criterionScores, rubric);
+    const tier = assignTier(overallScore);
 
     return NextResponse.json({
       candidate: {
@@ -62,8 +64,8 @@ export async function POST(request: Request) {
         currentRole: candidate.title || 'Unknown',
         currentCompany: candidate.company || 'Unknown',
         yearsExperience: 0,
-        scores: result.scores,
-        overallScore: result.overallScore,
+        scores: { criterionScores: result.criterionScores },
+        overallScore,
         tier,
         strengths: result.strengths,
         gaps: result.gaps,

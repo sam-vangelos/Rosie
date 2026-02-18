@@ -1,6 +1,6 @@
 'use client';
 
-import { Candidate, Tier } from '@/lib/types';
+import { Candidate, Tier, ScoringRubric } from '@/lib/types';
 import { CandidateCard } from './CandidateCard';
 import { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 interface TierSectionProps {
   tier: Tier;
   candidates: Candidate[];
+  rubric?: ScoringRubric | null;
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onSelectAll: (ids: string[]) => void;
@@ -47,6 +48,7 @@ const tierConfig = {
 export function TierSection({
   tier,
   candidates,
+  rubric,
   selectedIds,
   onToggleSelect,
   onSelectAll,
@@ -124,6 +126,7 @@ export function TierSection({
               key={candidate.id}
               candidate={candidate}
               rank={globalRankMap?.get(candidate.id) || 0}
+              rubric={rubric}
               selected={selectedIds.has(candidate.id)}
               onSelect={onToggleSelect}
             />

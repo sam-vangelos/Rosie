@@ -24,21 +24,31 @@ Next.js 16 App Router with a 4-step workflow: **Setup → Calibrate → Score �
 
 All state lives in `page.tsx` as a single `ScreeningSession` object — no external state management. The workflow is sequential: generate a rubric, optionally calibrate with top-performer resumes, score all candidates, view tier-ranked results.
 
+### Scoring Model (discriminative criteria)
+
+The rubric produces 3-5 **discriminative criteria** — specific signals that separate top 5% candidates from the rest. NOT generic dimensions like "technical skills" or "experience level". Each criterion has a weight (summing to 100) and a scoring guide (high/mid/low descriptions).
+
+**Table stakes** (Python, SQL, etc.) are listed but NOT scored — they have no discriminative value.
+
+**Weighted average** is computed in code (`computeOverallScore` in `anthropic.ts`), not by Claude. This makes scores deterministic and reproducible.
+
+**Calibration** extracts patterns from exemplar resumes, then refines the rubric via `calibrateRubric()`. The calibrated rubric includes a `calibrationSummary` explaining what changed.
+
 ### Core libraries (`src/lib/`)
 
 | File | Role |
 |------|------|
-| `anthropic.ts` | Three Claude calls: `generateRubric`, `extractPatterns`, `scoreCandidate`. Uses Sonnet 4.5. Includes retry logic (3 attempts, exponential backoff) and a JSON extraction helper that handles markdown fences. |
+| `anthropic.ts` | Four Claude calls: `generateRubric`, `extractPatterns`, `calibrateRubric`, `scoreCandidate`. Plus `computeOverallScore` (pure code, no AI). Uses Sonnet 4.5. Includes retry logic and JSON extraction. |
 | `greenhouse.ts` | Greenhouse Harvest API v1 client. Paginated fetches, resume download (PDF as base64, DOCX text via mammoth), rate-limit handling. |
-| `types.ts` | All TypeScript interfaces: `ScoringRubric`, `IdealPatterns`, `Candidate`, `ScreeningSession`. |
+| `types.ts` | All TypeScript interfaces: `ScoringRubric` (discriminative criteria + table stakes), `CandidateScores` (per-criterion scores with evidence), `IdealPatterns`, `Candidate`, `ScreeningSession`. |
 
 ### API routes (`src/app/api/`)
 
 - `greenhouse/jobs` — GET lists open jobs (filters templates); POST fetches a job's description (strips HTML, falls back to `internal_content`)
 - `greenhouse/candidates` — POST fetches candidates in "Application Review" stage with resumes
-- `rubric/generate` — POST takes JD + intake notes → Claude → structured rubric JSON
-- `calibrate` — POST takes uploaded resumes (FormData) → local text extraction → Claude → ideal patterns
-- `score` — POST takes rubric + patterns + candidate → Claude → scores + reasoning + tier
+- `rubric/generate` — POST takes JD + intake notes → Claude → discriminative criteria rubric
+- `calibrate` — POST takes uploaded resumes + rubric + JD (FormData) → pattern extraction → rubric calibration → calibrated rubric + patterns
+- `score` — POST takes rubric + patterns + candidate → Claude → per-criterion scores with evidence → weighted average computed in code → tier
 
 ### Resume handling
 

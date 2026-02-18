@@ -1,6 +1,6 @@
 'use client';
 
-import { Candidate } from '@/lib/types';
+import { Candidate, ScoringRubric } from '@/lib/types';
 import { ScoreRing } from './ScoreRing';
 import { TierBadge } from './TierBadge';
 import { useState } from 'react';
@@ -11,12 +11,26 @@ import { Card, CardContent } from '@/components/ui/card';
 interface CandidateCardProps {
   candidate: Candidate;
   rank: number;
+  rubric?: ScoringRubric | null;
   selected?: boolean;
   onSelect?: (id: string) => void;
 }
 
-export function CandidateCard({ candidate, rank, selected, onSelect }: CandidateCardProps) {
+function scoreColor(value: number): string {
+  if (value >= 9) return 'var(--tier-top)';
+  if (value >= 8) return 'var(--tier-strong)';
+  if (value >= 7) return 'var(--tier-moderate)';
+  return 'var(--tier-below)';
+}
+
+export function CandidateCard({ candidate, rank, rubric, selected, onSelect }: CandidateCardProps) {
   const [expanded, setExpanded] = useState(false);
+
+  // Map criterion IDs to names from the rubric
+  const criterionName = (id: string): string => {
+    if (!rubric) return id;
+    return rubric.criteria.find((c) => c.id === id)?.name ?? id;
+  };
 
   return (
     <Card
@@ -85,36 +99,47 @@ export function CandidateCard({ candidate, rank, selected, onSelect }: Candidate
 
       {expanded && (
         <div className="border-t px-4 py-4 space-y-4">
-          {/* Score Breakdown with visual bars */}
+          {/* Per-Criterion Scores with evidence */}
           <div>
             <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
-              Score Breakdown
+              Criterion Scores
             </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {Object.entries(candidate.scores).map(([key, value]) => (
-                <div key={key} className="bg-muted rounded-md p-3">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="text-xs text-muted-foreground capitalize">{key}</div>
-                    <div className="text-sm font-semibold text-foreground">{value.toFixed(1)}</div>
+            <div className="space-y-3">
+              {candidate.scores.criterionScores.map((cs) => {
+                const criterion = rubric?.criteria.find((c) => c.id === cs.criterionId);
+                const weight = criterion?.weight ?? 0;
+                return (
+                  <div key={cs.criterionId} className="bg-muted rounded-md p-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-foreground font-medium">
+                          {criterionName(cs.criterionId)}
+                        </span>
+                        {weight > 0 && (
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {weight}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-sm font-semibold text-foreground">{cs.score.toFixed(1)}</div>
+                    </div>
+                    <div className="h-1.5 bg-background rounded-full overflow-hidden mb-2">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${(cs.score / 10) * 100}%`,
+                          backgroundColor: scoreColor(cs.score),
+                        }}
+                      />
+                    </div>
+                    {cs.evidence && (
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {cs.evidence}
+                      </p>
+                    )}
                   </div>
-                  <div className="h-1.5 bg-background rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{
-                        width: `${(value / 10) * 100}%`,
-                        backgroundColor:
-                          value >= 9
-                            ? 'var(--tier-top)'
-                            : value >= 8
-                            ? 'var(--tier-strong)'
-                            : value >= 7
-                            ? 'var(--tier-moderate)'
-                            : 'var(--tier-below)',
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

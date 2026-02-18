@@ -367,6 +367,13 @@ export default function Home() {
     try {
       const formData = new FormData();
       calibrationFiles.forEach((file) => formData.append('resumes', file));
+      // Pass rubric + JD so the calibrate route can refine the rubric
+      if (session.rubric) {
+        formData.append('rubric', JSON.stringify(session.rubric));
+      }
+      if (session.jobDescription) {
+        formData.append('jobDescription', session.jobDescription);
+      }
 
       const res = await fetch('/api/calibrate', {
         method: 'POST',
@@ -392,13 +399,18 @@ export default function Home() {
       } catch {
         throw new Error(`Invalid response from server: ${responseText.slice(0, 200)}`);
       }
-      setSession((prev) => ({ ...prev, idealPatterns: data.patterns }));
+      setSession((prev) => ({
+        ...prev,
+        idealPatterns: data.patterns,
+        // Use calibrated rubric if available, otherwise keep existing
+        rubric: data.calibratedRubric || prev.rubric,
+      }));
     } catch (err) {
       setCalibrationError(err instanceof Error ? err.message : 'Calibration failed');
     } finally {
       setIsCalibrating(false);
     }
-  }, [calibrationFiles]);
+  }, [calibrationFiles, session.rubric, session.jobDescription]);
 
   // ---- Candidate Preview (count only, no resumes) ----
   const fetchCandidatePreview = useCallback(async () => {
@@ -909,7 +921,7 @@ export default function Home() {
                 <div>
                   <h2 className="text-2xl font-bold text-foreground">Scoring Summary</h2>
                   <p className="text-muted-foreground mt-2">
-                    Here&rsquo;s how candidates will be evaluated. Review before scoring.
+                    The model will score candidates on these discriminative criteria.
                   </p>
                 </div>
 
@@ -924,7 +936,7 @@ export default function Home() {
                           Calibrated with {calibrationFiles.length} resume{calibrationFiles.length !== 1 ? 's' : ''}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          The model has learned patterns from your top candidates
+                          Rubric refined based on exemplar patterns
                         </p>
                       </div>
                       <Button
@@ -940,87 +952,56 @@ export default function Home() {
                       </Button>
                     </div>
 
-                    {/* Two-column: Rubric highlights + Learned patterns */}
-                    <div className="grid md:grid-cols-2 gap-6">
-                      {/* From Rubric */}
-                      <div>
-                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
-                          From Your Rubric
+                    {/* Calibration Summary — plain English */}
+                    {session.rubric?.calibrationSummary && (
+                      <div className="p-4 bg-chart-1/5 border border-chart-1/20 rounded-lg">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                          What calibration changed
+                        </p>
+                        <p className="text-sm text-foreground leading-relaxed">
+                          {session.rubric.calibrationSummary}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Discriminative Criteria */}
+                    {session.rubric && (
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                          Scoring Criteria
                         </h3>
-                        {session.rubric && (
-                          <div className="space-y-2">
-                            {/* Top weighted requirements */}
-                            {[...session.rubric.mustHaves, ...session.rubric.niceToHaves]
-                              .sort((a, b) => b.weight - a.weight)
-                              .slice(0, 5)
-                              .map((item, i) => (
-                                <div key={i} className="flex items-start gap-2">
-                                  <span className="text-xs font-mono text-muted-foreground w-8 shrink-0 pt-0.5">
-                                    {item.weight}%
-                                  </span>
-                                  <span className="text-sm text-foreground">{item.requirement}</span>
-                                </div>
-                              ))}
-                            {session.rubric.mustHaves.length + session.rubric.niceToHaves.length > 5 && (
-                              <p className="text-xs text-muted-foreground pl-10">
-                                +{session.rubric.mustHaves.length + session.rubric.niceToHaves.length - 5} more
-                              </p>
-                            )}
-                            <div className="pt-2">
-                              <p className="text-xs text-muted-foreground">
-                                Target: <span className="text-foreground">{session.rubric.seniorityTarget}</span>
-                              </p>
+                        {session.rubric.criteria.map((criterion) => (
+                          <div key={criterion.id} className="flex items-start gap-3 p-3 bg-muted rounded-md">
+                            <div className="flex-shrink-0 w-10 h-6 rounded bg-chart-1/20 text-chart-1 text-xs font-medium flex items-center justify-center">
+                              {criterion.weight}%
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground">{criterion.name}</p>
+                              <p className="text-xs text-muted-foreground mt-0.5">{criterion.description}</p>
                             </div>
                           </div>
-                        )}
+                        ))}
                       </div>
+                    )}
 
-                      {/* From Calibration */}
+                    {/* Table Stakes */}
+                    {session.rubric && session.rubric.tableStakes.length > 0 && (
                       <div>
-                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
-                          Learned from Calibration
+                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+                          Table Stakes (not scored)
                         </h3>
-                        <div className="space-y-3">
-                          {/* Top skills */}
-                          {session.idealPatterns.commonSkills.length > 0 && (
-                            <div>
-                              <p className="text-xs text-muted-foreground mb-1.5">Key skills</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {session.idealPatterns.commonSkills
-                                  .filter((s) => s.frequency === 'all' || s.frequency === 'most')
-                                  .slice(0, 8)
-                                  .map((s, i) => (
-                                    <span
-                                      key={i}
-                                      className="px-2 py-0.5 bg-muted rounded text-xs text-foreground"
-                                    >
-                                      {s.skill}
-                                    </span>
-                                  ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Top patterns */}
-                          {session.idealPatterns.careerPatterns.length > 0 && (
-                            <div>
-                              <p className="text-xs text-muted-foreground mb-1.5">Career patterns</p>
-                              <ul className="space-y-1">
-                                {session.idealPatterns.careerPatterns
-                                  .filter((p) => p.frequency === 'all' || p.frequency === 'most')
-                                  .slice(0, 3)
-                                  .map((p, i) => (
-                                    <li key={i} className="text-sm text-foreground flex items-start gap-1.5">
-                                      <span className="text-muted-foreground mt-1">-</span>
-                                      {p.pattern}
-                                    </li>
-                                  ))}
-                              </ul>
-                            </div>
-                          )}
+                        <div className="flex flex-wrap gap-1.5">
+                          {session.rubric.tableStakes.map((skill, i) => (
+                            <span
+                              key={i}
+                              className="px-2 py-0.5 bg-muted rounded text-xs text-muted-foreground"
+                            >
+                              {skill}
+                            </span>
+                          ))}
                         </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Expandable full rubric detail */}
                     <div className="border-t pt-4">
@@ -1031,7 +1012,7 @@ export default function Home() {
                         <ChevronDown
                           className={cn('size-4 transition-transform', showRubricDetail && 'rotate-180')}
                         />
-                        {showRubricDetail ? 'Hide' : 'View'} full rubric detail
+                        {showRubricDetail ? 'Hide' : 'View'} full scoring guides
                       </button>
                       {showRubricDetail && session.rubric && (
                         <div className="mt-4">
@@ -1172,28 +1153,33 @@ export default function Home() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
+                    // Build dynamic headers from rubric criteria
+                    const criteriaHeaders = session.rubric?.criteria.map((c) => c.name) || [];
                     const headers = [
                       'Rank', 'Name', 'Email', 'Role', 'Company', 'Overall Score', 'Tier',
-                      'Technical', 'Experience', 'Alignment', 'Growth',
+                      ...criteriaHeaders,
                       'Strengths', 'Gaps', 'Reasoning', 'Greenhouse URL',
                     ];
-                    const rows = session.candidates.map((c, i) => [
-                      i + 1,
-                      c.name,
-                      c.email,
-                      c.currentRole,
-                      c.currentCompany,
-                      c.overallScore,
-                      c.tier,
-                      c.scores.technical,
-                      c.scores.experience,
-                      c.scores.alignment,
-                      c.scores.growth,
-                      c.strengths.join('; '),
-                      c.gaps.join('; '),
-                      c.reasoning,
-                      c.greenhouseUrl || '',
-                    ]);
+                    const rows = session.candidates.map((c, i) => {
+                      const criteriaScores = (session.rubric?.criteria || []).map((criterion) => {
+                        const cs = c.scores.criterionScores.find((s) => s.criterionId === criterion.id);
+                        return cs ? cs.score : '';
+                      });
+                      return [
+                        i + 1,
+                        c.name,
+                        c.email,
+                        c.currentRole,
+                        c.currentCompany,
+                        c.overallScore,
+                        c.tier,
+                        ...criteriaScores,
+                        c.strengths.join('; '),
+                        c.gaps.join('; '),
+                        c.reasoning,
+                        c.greenhouseUrl || '',
+                      ];
+                    });
                     const csv = [headers, ...rows]
                       .map((row) =>
                         row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')
@@ -1264,6 +1250,7 @@ export default function Home() {
                   key={tier}
                   tier={tier}
                   candidates={candidatesByTier[tier]}
+                  rubric={session.rubric}
                   selectedIds={selectedCandidates}
                   onToggleSelect={handleToggleSelect}
                   onSelectAll={handleSelectAll}
