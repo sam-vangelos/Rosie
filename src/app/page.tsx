@@ -244,62 +244,56 @@ export default function Home() {
       setScoringProgress({
         completed: 0,
         total: ghCandidates.length,
-        current: ghCandidates[0]?.name || '',
+        current: '',
         failed: 0,
       });
 
+      // Score candidates in parallel with concurrency limit
+      const CONCURRENCY = 5;
       const scoredCandidates: Candidate[] = [];
+      let completed = 0;
       let failed = 0;
 
-      for (let i = 0; i < ghCandidates.length; i++) {
+      // Process in batches of CONCURRENCY
+      for (let batchStart = 0; batchStart < ghCandidates.length; batchStart += CONCURRENCY) {
         if (scoringAbortRef.current) break;
 
-        const ghCandidate = ghCandidates[i];
-        setScoringProgress({
-          completed: i,
-          total: ghCandidates.length,
-          current: ghCandidate.name,
-          failed,
-        });
+        const batch = ghCandidates.slice(batchStart, batchStart + CONCURRENCY);
+        const batchNames = batch.map((c: { name: string }) => c.name).join(', ');
+        setScoringProgress({ completed, total: ghCandidates.length, current: batchNames, failed });
 
-        try {
-          const scoreRes = await fetch('/api/score', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              rubric: session.rubric,
-              idealPatterns: session.idealPatterns,
-              candidate: ghCandidate,
-            }),
-          });
+        const results = await Promise.allSettled(
+          batch.map(async (ghCandidate: { name: string }) => {
+            const scoreRes = await fetch('/api/score', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                rubric: session.rubric,
+                idealPatterns: session.idealPatterns,
+                candidate: ghCandidate,
+              }),
+            });
 
-          const scoreText = await scoreRes.text();
-          if (scoreRes.ok) {
-            try {
-              const scoreData = JSON.parse(scoreText);
-              scoredCandidates.push(scoreData.candidate);
-            } catch {
-              failed++;
-              console.error(`Invalid JSON scoring ${ghCandidate.name}: ${scoreText.slice(0, 100)}`);
-            }
+            const scoreText = await scoreRes.text();
+            if (!scoreRes.ok) throw new Error(`HTTP ${scoreRes.status}: ${scoreText.slice(0, 100)}`);
+            const scoreData = JSON.parse(scoreText);
+            return scoreData.candidate as Candidate;
+          })
+        );
+
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            scoredCandidates.push(result.value);
           } else {
             failed++;
-            console.error(`Failed to score ${ghCandidate.name}: ${scoreText.slice(0, 100)}`);
+            console.error(`Scoring failed:`, result.reason);
           }
-        } catch {
-          failed++;
-          console.error(`Network error scoring ${ghCandidate.name}`);
         }
+        completed += batch.length;
+        setScoringProgress({ completed, total: ghCandidates.length, current: '', failed });
       }
 
       scoredCandidates.sort((a, b) => b.overallScore - a.overallScore);
-
-      setScoringProgress({
-        completed: ghCandidates.length,
-        total: ghCandidates.length,
-        current: '',
-        failed,
-      });
 
       setSession((prev) => ({
         ...prev,
@@ -1130,16 +1124,14 @@ export default function Home() {
 
         {/* ============ STEP 4: RESULTS ============ */}
         {currentStep === 4 && (
-          <div className="space-y-8">
+          <div className="space-y-6">
             <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-bold text-foreground">Screening Results</h2>
-                <p className="text-muted-foreground mt-1">
-                  {session.jobTitle || 'Job'} &bull; {session.candidates.length} candidates scored
-                  {scoringProgress.failed > 0 && (
-                    <span className="text-tier-moderate"> &bull; {scoringProgress.failed} failed</span>
-                  )}
-                </p>
+                <h2 className="text-2xl font-bold text-foreground">{session.jobTitle || 'Screening Results'}</h2>
+                <ResultsSummary candidates={session.candidates} />
+                {scoringProgress.failed > 0 && (
+                  <p className="text-xs text-tier-moderate mt-0.5">{scoringProgress.failed} failed to score</p>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <Button
@@ -1201,8 +1193,6 @@ export default function Home() {
                 </Button>
               </div>
             </div>
-
-            <ResultsSummary candidates={session.candidates} />
 
             {/* Candidate search */}
             {session.candidates.length > 5 && (

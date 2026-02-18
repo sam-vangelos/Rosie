@@ -25,8 +25,8 @@ function scoreColor(value: number): string {
 
 export function CandidateCard({ candidate, rank, rubric, selected, onSelect }: CandidateCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
 
-  // Map criterion IDs to names from the rubric
   const criterionName = (id: string): string => {
     if (!rubric) return id;
     return rubric.criteria.find((c) => c.id === id)?.name ?? id;
@@ -66,25 +66,13 @@ export function CandidateCard({ candidate, rank, rubric, selected, onSelect }: C
                   onClick={(e) => e.stopPropagation()}
                 >
                   <ExternalLink className="size-3" />
-                  GH Profile
+                  GH
                 </a>
               )}
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
               {candidate.currentRole} at {candidate.currentCompany}
             </p>
-            <div className="flex items-center gap-3 mt-0.5">
-              {candidate.currentStage && (
-                <span className="text-xs text-muted-foreground/70">
-                  Stage: {candidate.currentStage}
-                </span>
-              )}
-              {candidate.source && candidate.source !== 'Unknown' && (
-                <span className="text-xs text-muted-foreground/70">
-                  Source: {candidate.source}
-                </span>
-              )}
-            </div>
           </div>
           <button
             onClick={() => setExpanded(!expanded)}
@@ -98,93 +86,76 @@ export function CandidateCard({ candidate, rank, rubric, selected, onSelect }: C
       </CardContent>
 
       {expanded && (
-        <div className="border-t px-4 py-4 space-y-4">
-          {/* Per-Criterion Scores with evidence */}
-          <div>
-            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
-              Criterion Scores
-            </h4>
-            <div className="space-y-3">
-              {candidate.scores.criterionScores.map((cs) => {
-                const criterion = rubric?.criteria.find((c) => c.id === cs.criterionId);
-                const weight = criterion?.weight ?? 0;
-                return (
-                  <div key={cs.criterionId} className="bg-muted rounded-md p-3">
-                    <div className="flex items-center justify-between mb-1.5">
+        <div className="border-t px-4 py-3 space-y-3">
+          {/* Criterion scores — compact bars, no evidence by default */}
+          <div className="space-y-2">
+            {candidate.scores.criterionScores.map((cs) => {
+              const criterion = rubric?.criteria.find((c) => c.id === cs.criterionId);
+              const weight = criterion?.weight ?? 0;
+              return (
+                <div key={cs.criterionId}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground font-mono w-7 shrink-0">{weight}%</span>
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm text-foreground font-medium">
+                        <span className="text-xs text-foreground font-medium truncate">
                           {criterionName(cs.criterionId)}
                         </span>
-                        {weight > 0 && (
-                          <span className="text-xs text-muted-foreground font-mono">
-                            {weight}%
-                          </span>
-                        )}
+                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${(cs.score / 10) * 100}%`,
+                              backgroundColor: scoreColor(cs.score),
+                            }}
+                          />
+                        </div>
+                        <span className="text-xs font-semibold text-foreground w-7 text-right">{cs.score.toFixed(1)}</span>
                       </div>
-                      <div className="text-sm font-semibold text-foreground">{cs.score.toFixed(1)}</div>
                     </div>
-                    <div className="h-1.5 bg-background rounded-full overflow-hidden mb-2">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{
-                          width: `${(cs.score / 10) * 100}%`,
-                          backgroundColor: scoreColor(cs.score),
-                        }}
-                      />
-                    </div>
-                    {cs.evidence && (
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        {cs.evidence}
-                      </p>
-                    )}
                   </div>
-                );
-              })}
-            </div>
+                  {showEvidence && cs.evidence && (
+                    <p className="text-xs text-muted-foreground ml-9 mt-0.5">{cs.evidence}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
-          {/* Strengths */}
-          {candidate.strengths.length > 0 && (
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                Strengths
-              </h4>
-              <ul className="space-y-1">
-                {candidate.strengths.map((strength, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Plus className="size-3.5 text-tier-top mt-0.5 shrink-0" />
-                    {strength}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {/* Evidence toggle */}
+          <button
+            onClick={() => setShowEvidence(!showEvidence)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {showEvidence ? 'Hide evidence' : 'Show evidence'}
+          </button>
 
-          {/* Gaps */}
-          {candidate.gaps.length > 0 && (
-            <div>
-              <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-                Gaps
-              </h4>
-              <ul className="space-y-1">
-                {candidate.gaps.map((gap, i) => (
-                  <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Minus className="size-3.5 text-tier-moderate mt-0.5 shrink-0" />
-                    {gap}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Reasoning */}
-          <div>
-            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
-              AI Assessment
-            </h4>
-            <p className="text-sm text-muted-foreground bg-muted rounded-md p-3 leading-relaxed">
-              {candidate.reasoning}
-            </p>
+          {/* Strengths + Gaps inline */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            {candidate.strengths.length > 0 && (
+              <div className="flex-1">
+                <ul className="space-y-0.5">
+                  {candidate.strengths.map((s, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <Plus className="size-3 text-tier-top mt-0.5 shrink-0" />
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {candidate.gaps.length > 0 && (
+              <div className="flex-1">
+                <ul className="space-y-0.5">
+                  {candidate.gaps.map((g, i) => (
+                    <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                      <Minus className="size-3 text-tier-moderate mt-0.5 shrink-0" />
+                      {g}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -282,7 +282,8 @@ export interface ScoringResult {
   criterionScores: CriterionScore[];
   strengths: string[];
   gaps: string[];
-  reasoning: string;
+  currentRole: string;
+  currentCompany: string;
 }
 
 export async function scoreCandidate(
@@ -333,47 +334,32 @@ export async function scoreCandidate(
 
     content.push({
       type: 'text',
-      text: `You are scoring a candidate against specific discriminative criteria. Be rigorous and evidence-based.
+      text: `Score this candidate against these criteria. Be terse — every field has a max length.
 
-## Scoring Criteria
+## Criteria
 ${criteriaInstructions}
 ${patternsSection}
 
-## Table Stakes (NOT scored — assumed baseline)
-${rubric.tableStakes.length > 0 ? rubric.tableStakes.join(', ') : 'None specified'}
-
-## Instructions
-
-Score this candidate on EACH criterion individually (0-10, one decimal place). For each criterion:
-- Extract SPECIFIC evidence from the resume that supports your score
-- Use the scoring guide ranges: 9-10 = exceptional, 6-8 = adequate, 1-5 = weak/missing
-- If no evidence exists for a criterion, score 3-4 (not 5-6 — absence of evidence is a real signal for discriminative criteria)
-- Do NOT score table-stakes skills — they are not part of the evaluation
-
-Also provide:
-- **strengths**: 2-4 specific strengths citing actual resume content
-- **gaps**: 1-3 specific gaps or missing signals
-- **reasoning**: 2-3 sentence overall assessment
-
-Rules:
-- Base scores ONLY on evidence in the resume. Do not assume skills that aren't demonstrated.
-- Be specific in evidence — cite job titles, companies, projects, technologies, or achievements from the resume.
-- Do NOT penalize for demographics, school prestige, or company brand.
+## Rules
+- Score 0-10 (one decimal). 9-10 = exceptional, 6-8 = adequate, 1-5 = weak. No evidence = score 3-4.
+- Evidence: ONE sentence max. Cite specific facts (job title, company, project, metric). No filler.
+- Strengths/gaps: short phrases, 8-10 words max each. Example: "6 yrs frontier lab RL (Google, DeepMind)"
+- Extract currentRole and currentCompany from their MOST RECENT position in the resume.
+- Do NOT score table-stakes skills: ${rubric.tableStakes.length > 0 ? rubric.tableStakes.join(', ') : 'none'}
 
 Respond with ONLY valid JSON:
 {
-  "criterionScores": [
-    { "criterionId": string, "score": number, "evidence": string }
-  ],
+  "criterionScores": [{ "criterionId": string, "score": number, "evidence": string }],
   "strengths": [string],
   "gaps": [string],
-  "reasoning": string
+  "currentRole": string,
+  "currentCompany": string
 }`,
     });
 
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 4096,
+      max_tokens: 1500,
       messages: [{ role: 'user', content }],
     });
 
@@ -394,7 +380,8 @@ Respond with ONLY valid JSON:
 
     result.strengths = result.strengths || [];
     result.gaps = result.gaps || [];
-    result.reasoning = result.reasoning || '';
+    result.currentRole = result.currentRole || '';
+    result.currentCompany = result.currentCompany || '';
 
     return result;
   }, `scoreCandidate:${candidateName}`);

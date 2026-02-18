@@ -54,6 +54,10 @@ export async function POST(request: Request) {
     const overallScore = computeOverallScore(result.criterionScores, rubric);
     const tier = assignTier(overallScore);
 
+    // Use AI-extracted role/company, fall back to Greenhouse metadata
+    const currentRole = result.currentRole || candidate.title || 'Unknown';
+    const currentCompany = result.currentCompany || candidate.company || 'Unknown';
+
     return NextResponse.json({
       candidate: {
         id: String(candidate.id),
@@ -61,15 +65,15 @@ export async function POST(request: Request) {
         greenhouseUrl: `https://app.greenhouse.io/people/${candidate.id}`,
         name: candidate.name,
         email: candidate.email,
-        currentRole: candidate.title || 'Unknown',
-        currentCompany: candidate.company || 'Unknown',
+        currentRole,
+        currentCompany,
         yearsExperience: 0,
         scores: { criterionScores: result.criterionScores },
         overallScore,
         tier,
         strengths: result.strengths,
         gaps: result.gaps,
-        reasoning: result.reasoning,
+        reasoning: '',
         resumeFilename: candidate.resumeFilename,
         applicationStatus: candidate.applicationStatus,
         currentStage: candidate.currentStage,
