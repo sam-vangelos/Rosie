@@ -105,9 +105,9 @@ export function CandidateCard({ candidate, rank, selected, onSelect }: Candidate
                         backgroundColor:
                           value >= 9
                             ? 'var(--tier-top)'
-                            : value >= 7
+                            : value >= 8
                             ? 'var(--tier-strong)'
-                            : value >= 5
+                            : value >= 7
                             ? 'var(--tier-moderate)'
                             : 'var(--tier-below)',
                       }}

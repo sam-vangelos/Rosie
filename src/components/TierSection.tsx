@@ -53,7 +53,7 @@ export function TierSection({
   onAction,
   globalRankMap,
 }: TierSectionProps) {
-  const [collapsed, setCollapsed] = useState(tier === 'below');
+  const [collapsed, setCollapsed] = useState(tier === 'moderate' || tier === 'below');
   const config = tierConfig[tier];
   const tierCandidateIds = candidates.map((c) => c.id);
   const selectedInTier = tierCandidateIds.filter((id) => selectedIds.has(id));

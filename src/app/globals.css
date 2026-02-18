@@ -116,6 +116,21 @@
   }
 }
 
+/*
+  Tailwind safelist — these dynamic classes are used via template literals
+  (e.g., `stroke-tier-${tier}`) and must be present for the scanner to find them.
+
+  bg-tier-top bg-tier-strong bg-tier-moderate bg-tier-below
+  text-tier-top text-tier-strong text-tier-moderate text-tier-below
+  border-tier-top border-tier-strong border-tier-moderate border-tier-below
+  stroke-tier-top stroke-tier-strong stroke-tier-moderate stroke-tier-below
+  bg-tier-top/10 bg-tier-strong/10 bg-tier-moderate/10 bg-tier-below/10
+  bg-chart-1/10 bg-chart-1/5 bg-chart-1/20
+  text-chart-1 text-chart-2 text-chart-3 text-chart-4 text-chart-5
+  border-chart-1 border-chart-1/30
+  stroke-border
+*/
+
 /* Score ring rotation */
 .score-ring {
   transform: rotate(-90deg);

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCandidatesForJob, getResumeAttachment, downloadAttachment } from '@/lib/greenhouse';
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 interface CandidateWithResume {
   id: number;
@@ -26,7 +26,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'jobId is required' }, { status: 400 });
     }
 
-    const candidates = await getCandidatesForJob(jobId);
+    const allCandidates = await getCandidatesForJob(jobId);
+
+    // Filter to applicants in "Application Review" stage only
+    // - prospect === false means they applied (not sourced/prospected)
+    // - current_stage.name === 'Application Review'
+    // - status === 'active' (not rejected or hired)
+    const candidates = allCandidates.filter((candidate) => {
+      const application = candidate.applications?.find((app) =>
+        app.jobs?.some((j) => j.id === jobId)
+      );
+      if (!application) return false;
+      if (application.prospect) return false; // sourced, not applied
+      if (application.status !== 'active') return false;
+      const stageName = application.current_stage?.name?.toLowerCase() || '';
+      return stageName === 'application review';
+    });
+
+    console.log(`[candidates] Job ${jobId}: ${allCandidates.length} total → ${candidates.length} in Application Review (applicants only)`);
+
     const results: CandidateWithResume[] = [];
 
     for (const candidate of candidates) {
@@ -85,11 +103,16 @@ export async function POST(request: Request) {
       }
     }
 
+    // Count resumes: if we downloaded, check content. Otherwise, check filename (attachment exists).
+    const hasResume = (c: CandidateWithResume) =>
+      c.resumeBase64 || c.resumeText || (!includeResumes && c.resumeFilename);
+    const withResumes = results.filter(hasResume).length;
+
     return NextResponse.json({
       candidates: results,
       total: results.length,
-      withResumes: results.filter((c) => c.resumeBase64 || c.resumeText).length,
-      withoutResumes: results.filter((c) => !c.resumeBase64 && !c.resumeText).length,
+      withResumes,
+      withoutResumes: results.length - withResumes,
     });
   } catch (error) {
     console.error('Greenhouse candidates error:', error);

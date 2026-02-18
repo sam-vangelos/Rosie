@@ -6,6 +6,83 @@ const client = new Anthropic({
 });
 
 const MODEL = 'claude-sonnet-4-5-20250929';
+const MAX_RETRIES = 3;
+
+// ---- Retry helper ----
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  label: string,
+  retries = MAX_RETRIES
+): Promise<T> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isLast = attempt === retries;
+      const isRetryable =
+        err instanceof Error &&
+        (err.message.includes('rate_limit') ||
+          err.message.includes('overloaded') ||
+          err.message.includes('529') ||
+          err.message.includes('500') ||
+          err.message.includes('timeout') ||
+          err.message.includes('ECONNRESET'));
+
+      if (isLast || !isRetryable) throw err;
+
+      const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000);
+      console.warn(`[${label}] Attempt ${attempt} failed, retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error(`[${label}] All ${retries} attempts failed`);
+}
+
+// ---- JSON extraction (handles markdown code blocks, nested objects) ----
+
+function extractJSON(text: string, label: string): unknown {
+  // Try direct JSON.parse first (cleanest case)
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch { /* fall through */ }
+  }
+
+  // Strip markdown code fences
+  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch { /* fall through */ }
+  }
+
+  // Find the outermost balanced braces
+  const start = text.indexOf('{');
+  if (start === -1) throw new Error(`No JSON object found in ${label} response`);
+
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (end === -1) throw new Error(`Unbalanced braces in ${label} response`);
+
+  try {
+    return JSON.parse(text.slice(start, end));
+  } catch (err) {
+    throw new Error(`Failed to parse ${label} JSON: ${err instanceof Error ? err.message : 'unknown error'}`);
+  }
+}
 
 // ---- Rubric Generation ----
 
@@ -13,13 +90,14 @@ export async function generateRubric(
   jobDescription: string,
   intakeNotes: string
 ): Promise<ScoringRubric> {
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 2000,
-    messages: [
-      {
-        role: 'user',
-        content: `You are an expert technical recruiter building a candidate scoring rubric. Analyze the job description and hiring manager intake notes below, then generate a structured scoring rubric.
+  return withRetry(async () => {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: `You are an expert technical recruiter building a candidate scoring rubric. Analyze the job description and hiring manager intake notes below, then generate a structured scoring rubric.
 
 ## Job Description
 ${jobDescription}
@@ -51,16 +129,13 @@ Respond with ONLY valid JSON matching this schema:
   "hiddenPreferences": [{ "preference": string, "source": string }],
   "seniorityTarget": string
 }`,
-      },
-    ],
-  });
+        },
+      ],
+    });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  // Extract JSON from response (handle markdown code blocks)
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Failed to parse rubric JSON from Claude response');
-
-  return JSON.parse(jsonMatch[0]) as ScoringRubric;
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    return extractJSON(text, 'rubric') as ScoringRubric;
+  }, 'generateRubric');
 }
 
 // ---- Pattern Extraction from Ideal Resumes ----
@@ -68,17 +143,22 @@ Respond with ONLY valid JSON matching this schema:
 export async function extractPatterns(
   resumeTexts: string[]
 ): Promise<IdealPatterns> {
+  if (resumeTexts.length === 0) {
+    throw new Error('No resume texts provided for pattern extraction');
+  }
+
   const resumeSection = resumeTexts
     .map((text, i) => `### Resume ${i + 1}\n${text}`)
     .join('\n\n---\n\n');
 
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 2000,
-    messages: [
-      {
-        role: 'user',
-        content: `You are analyzing ${resumeTexts.length} resumes of ideal/top-performing candidates for a role. Extract common patterns that define what "good" looks like.
+  return withRetry(async () => {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      messages: [
+        {
+          role: 'user',
+          content: `You are analyzing ${resumeTexts.length} resumes of ideal/top-performing candidates for a role. Extract common patterns that define what "good" looks like.
 
 ## Resumes
 ${resumeSection}
@@ -98,15 +178,13 @@ Respond with ONLY valid JSON matching this schema:
   "careerPatterns": [{ "pattern": string, "frequency": "all"|"most"|"some" }],
   "achievementSignals": [{ "signal": string, "examples": [string] }]
 }`,
-      },
-    ],
-  });
+        },
+      ],
+    });
 
-  const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('Failed to parse patterns JSON from Claude response');
-
-  return JSON.parse(jsonMatch[0]) as IdealPatterns;
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    return extractJSON(text, 'patterns') as IdealPatterns;
+  }, 'extractPatterns');
 }
 
 // ---- Candidate Scoring ----
@@ -127,40 +205,41 @@ export async function scoreCandidate(
   resumeText: string | null,
   resumeMimeType: string
 ): Promise<ScoringResult> {
-  // Build the content array
-  const content: Anthropic.MessageCreateParams['messages'][0]['content'] = [];
+  return withRetry(async () => {
+    // Build the content array
+    const content: Anthropic.MessageCreateParams['messages'][0]['content'] = [];
 
-  // Add the resume - prefer PDF document block, fall back to text
-  if (resumeBase64 && resumeMimeType === 'application/pdf') {
-    content.push({
-      type: 'document',
-      source: {
-        type: 'base64',
-        media_type: 'application/pdf',
-        data: resumeBase64,
-      },
-    } as unknown as Anthropic.TextBlockParam);
-  } else if (resumeText) {
+    // Add the resume - prefer PDF document block, fall back to text
+    if (resumeBase64 && resumeMimeType === 'application/pdf') {
+      content.push({
+        type: 'document',
+        source: {
+          type: 'base64',
+          media_type: 'application/pdf',
+          data: resumeBase64,
+        },
+      } as unknown as Anthropic.TextBlockParam);
+    } else if (resumeText) {
+      content.push({
+        type: 'text',
+        text: `## Candidate Resume\n${resumeText}`,
+      });
+    } else {
+      // No resume available - score based on minimal info
+      content.push({
+        type: 'text',
+        text: `## Candidate: ${candidateName}\nNo resume available for this candidate.`,
+      });
+    }
+
+    // Add the scoring prompt
+    const patternsSection = idealPatterns
+      ? `\n## Ideal Candidate Patterns (from top performers in similar roles)\n${JSON.stringify(idealPatterns, null, 2)}\n\nUse these patterns as additional signal when scoring. Candidates matching these patterns should receive a boost.`
+      : '';
+
     content.push({
       type: 'text',
-      text: `## Candidate Resume\n${resumeText}`,
-    });
-  } else {
-    // No resume available - score based on minimal info
-    content.push({
-      type: 'text',
-      text: `## Candidate: ${candidateName}\nNo resume available for this candidate.`,
-    });
-  }
-
-  // Add the scoring prompt
-  const patternsSection = idealPatterns
-    ? `\n## Ideal Candidate Patterns (from top performers in similar roles)\n${JSON.stringify(idealPatterns, null, 2)}\n\nUse these patterns as additional signal when scoring. Candidates matching these patterns should receive a boost.`
-    : '';
-
-  content.push({
-    type: 'text',
-    text: `You are an expert technical recruiter scoring a candidate against a role-specific rubric. Be rigorous, fair, and evidence-based.
+      text: `You are an expert technical recruiter scoring a candidate against a role-specific rubric. Be rigorous, fair, and evidence-based.
 
 ## Scoring Rubric
 ${JSON.stringify(rubric, null, 2)}
@@ -191,73 +270,36 @@ Respond with ONLY valid JSON:
   "gaps": [string, string, ...],
   "reasoning": string
 }`,
-  });
-
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 1500,
-    messages: [{ role: 'user', content }],
-  });
-
-  const text = response.content[0].type === 'text' ? response.content[0].text : '';
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error(`Failed to parse scoring JSON for ${candidateName}`);
-
-  const result = JSON.parse(jsonMatch[0]) as ScoringResult;
-
-  // Clamp scores to 0-10 range
-  result.scores.technical = Math.min(10, Math.max(0, result.scores.technical));
-  result.scores.experience = Math.min(10, Math.max(0, result.scores.experience));
-  result.scores.alignment = Math.min(10, Math.max(0, result.scores.alignment));
-  result.scores.growth = Math.min(10, Math.max(0, result.scores.growth));
-  result.overallScore = Math.min(10, Math.max(0, result.overallScore));
-
-  // Round to 1 decimal
-  result.scores.technical = Math.round(result.scores.technical * 10) / 10;
-  result.scores.experience = Math.round(result.scores.experience * 10) / 10;
-  result.scores.alignment = Math.round(result.scores.alignment * 10) / 10;
-  result.scores.growth = Math.round(result.scores.growth * 10) / 10;
-  result.overallScore = Math.round(result.overallScore * 10) / 10;
-
-  return result;
-}
-
-// ---- Extract text from resume via Claude (for non-PDF formats) ----
-
-export async function extractResumeText(
-  base64Data: string,
-  mimeType: string,
-  filename: string
-): Promise<string> {
-  // For PDFs, Claude can read directly. For other formats, we do our best.
-  if (mimeType === 'application/pdf') {
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4000,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: base64Data,
-              },
-            } as unknown as Anthropic.TextBlockParam,
-            {
-              type: 'text',
-              text: 'Extract all text content from this resume. Preserve the structure (sections, bullet points) but output as plain text. Include all details: name, contact, experience, education, skills, etc.',
-            },
-          ],
-        },
-      ],
     });
 
-    return response.content[0].type === 'text' ? response.content[0].text : '';
-  }
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 4096,
+      messages: [{ role: 'user', content }],
+    });
 
-  // For non-PDF, return a note
-  return `[Resume file: ${filename} - format ${mimeType} not directly parseable]`;
+    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+    const result = extractJSON(text, `scoring:${candidateName}`) as ScoringResult;
+
+    // Validate required fields
+    if (!result.scores || typeof result.overallScore !== 'number') {
+      throw new Error(`Invalid scoring response for ${candidateName}: missing required fields`);
+    }
+
+    // Clamp scores to 0-10 range and round to 1 decimal
+    const clampAndRound = (v: number) => Math.round(Math.min(10, Math.max(0, v)) * 10) / 10;
+    result.scores.technical = clampAndRound(result.scores.technical);
+    result.scores.experience = clampAndRound(result.scores.experience);
+    result.scores.alignment = clampAndRound(result.scores.alignment);
+    result.scores.growth = clampAndRound(result.scores.growth);
+    result.overallScore = clampAndRound(result.overallScore);
+
+    // Ensure arrays exist
+    result.strengths = result.strengths || [];
+    result.gaps = result.gaps || [];
+    result.reasoning = result.reasoning || '';
+
+    return result;
+  }, `scoreCandidate:${candidateName}`);
 }
+

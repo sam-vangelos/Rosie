@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect, DragEvent } from 'react';
 import { Candidate, ScreeningSession, Tier, GreenhouseJob, ScoringRubric } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { StepIndicator } from '@/components/StepIndicator';
 import { RubricDisplay } from '@/components/RubricDisplay';
-import { IdealPatternsDisplay } from '@/components/IdealPatternsDisplay';
+
 import { ScoringProgress } from '@/components/ScoringProgress';
 import { ResultsSummary } from '@/components/ResultsSummary';
 import { TierSection } from '@/components/TierSection';
@@ -30,11 +30,15 @@ import {
   Upload,
   Search,
   RefreshCw,
+  FileText,
+  CheckCircle2,
+  Users,
+  ChevronDown,
 } from 'lucide-react';
 
 const steps = [
-  { label: 'Setup', description: 'Configure requirements' },
-  { label: 'Calibrate', description: 'Review rubric' },
+  { label: 'Setup', description: 'JD + intake notes' },
+  { label: 'Calibrate', description: 'Few-shot training' },
   { label: 'Score', description: 'AI evaluation' },
   { label: 'Results', description: 'Review & act' },
 ];
@@ -58,8 +62,6 @@ export default function Home() {
     current: '',
     failed: 0,
   });
-  const [showRubric, setShowRubric] = useState(true);
-  const [showPatterns, setShowPatterns] = useState(false);
   const [actionMessage, setActionMessage] = useState<{
     type: 'success' | 'error';
     text: string;
@@ -79,6 +81,29 @@ export default function Home() {
 
   // Error state
   const [error, setError] = useState<string | null>(null);
+
+  // Results search
+  const [candidateSearchQuery, setCandidateSearchQuery] = useState('');
+
+  // Calibration upload
+  const [calibrationFiles, setCalibrationFiles] = useState<File[]>([]);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibrationError, setCalibrationError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Candidate preview (fetched on Step 2 for count display)
+  const [candidatePreview, setCandidatePreview] = useState<{
+    total: number;
+    withResumes: number;
+  } | null>(null);
+  const [isFetchingPreview, setIsFetchingPreview] = useState(false);
+
+  // Rubric detail expand
+  const [showRubricDetail, setShowRubricDetail] = useState(false);
+
+  // Discard confirmation
+  const [pendingNav, setPendingNav] = useState<{ step: number; status: ScreeningSession['status'] } | null>(null);
 
   // Confirmation dialog
   const [confirmAction, setConfirmAction] = useState<{
@@ -145,12 +170,25 @@ export default function Home() {
         }),
       });
 
+      const responseText = await res.text();
+
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to generate rubric');
+        let errorMsg = 'Failed to generate rubric';
+        try {
+          const data = JSON.parse(responseText);
+          errorMsg = data.error || errorMsg;
+        } catch {
+          if (responseText) errorMsg = `Server error: ${responseText.slice(0, 200)}`;
+        }
+        throw new Error(errorMsg);
       }
 
-      const data = await res.json();
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Invalid response from server: ${responseText.slice(0, 200)}`);
+      }
       setSession((prev) => ({
         ...prev,
         rubric: data.rubric,
@@ -181,11 +219,17 @@ export default function Home() {
         body: JSON.stringify({ jobId: session.greenhouseJobId }),
       });
 
+      const candidatesText = await candidatesRes.text();
       if (!candidatesRes.ok) {
-        throw new Error('Failed to fetch candidates from Greenhouse');
+        let msg = 'Failed to fetch candidates from Greenhouse';
+        try { msg = JSON.parse(candidatesText).error || msg; } catch {}
+        throw new Error(msg);
       }
 
-      const candidatesData = await candidatesRes.json();
+      let candidatesData;
+      try { candidatesData = JSON.parse(candidatesText); } catch {
+        throw new Error(`Invalid response fetching candidates: ${candidatesText.slice(0, 200)}`);
+      }
       const ghCandidates = candidatesData.candidates;
       setIsFetchingCandidates(false);
 
@@ -229,16 +273,22 @@ export default function Home() {
             }),
           });
 
+          const scoreText = await scoreRes.text();
           if (scoreRes.ok) {
-            const scoreData = await scoreRes.json();
-            scoredCandidates.push(scoreData.candidate);
+            try {
+              const scoreData = JSON.parse(scoreText);
+              scoredCandidates.push(scoreData.candidate);
+            } catch {
+              failed++;
+              console.error(`Invalid JSON scoring ${ghCandidate.name}: ${scoreText.slice(0, 100)}`);
+            }
           } else {
             failed++;
-            console.error(`Failed to score ${ghCandidate.name}`);
+            console.error(`Failed to score ${ghCandidate.name}: ${scoreText.slice(0, 100)}`);
           }
         } catch {
           failed++;
-          console.error(`Error scoring ${ghCandidate.name}`);
+          console.error(`Network error scoring ${ghCandidate.name}`);
         }
       }
 
@@ -271,9 +321,115 @@ export default function Home() {
     scoringAbortRef.current = true;
   }, []);
 
-  const handleSkipCalibration = useCallback(() => {
-    handleStartScoring();
-  }, [handleStartScoring]);
+  // ---- Calibration Upload ----
+  const handleCalibrationFiles = useCallback((files: FileList | File[]) => {
+    const accepted = Array.from(files).filter((f) => {
+      const name = f.name.toLowerCase();
+      return name.endsWith('.pdf') || name.endsWith('.docx') || name.endsWith('.doc') || name.endsWith('.txt');
+    });
+    setCalibrationFiles((prev) => {
+      const combined = [...prev, ...accepted];
+      return combined.slice(0, 10); // max 10
+    });
+    setCalibrationError(null);
+  }, []);
+
+  const handleRemoveCalibrationFile = useCallback((index: number) => {
+    setCalibrationFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleDragOver = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: DragEvent) => {
+      e.preventDefault();
+      setIsDragOver(false);
+      if (e.dataTransfer.files) {
+        handleCalibrationFiles(e.dataTransfer.files);
+      }
+    },
+    [handleCalibrationFiles]
+  );
+
+  const handleUploadCalibration = useCallback(async () => {
+    if (calibrationFiles.length === 0) return;
+
+    setIsCalibrating(true);
+    setCalibrationError(null);
+    try {
+      const formData = new FormData();
+      calibrationFiles.forEach((file) => formData.append('resumes', file));
+
+      const res = await fetch('/api/calibrate', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const responseText = await res.text();
+
+      if (!res.ok) {
+        let errorMsg = 'Failed to process resumes';
+        try {
+          const data = JSON.parse(responseText);
+          errorMsg = data.error || errorMsg;
+        } catch {
+          if (responseText) errorMsg = `Server error: ${responseText.slice(0, 200)}`;
+        }
+        throw new Error(errorMsg);
+      }
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Invalid response from server: ${responseText.slice(0, 200)}`);
+      }
+      setSession((prev) => ({ ...prev, idealPatterns: data.patterns }));
+    } catch (err) {
+      setCalibrationError(err instanceof Error ? err.message : 'Calibration failed');
+    } finally {
+      setIsCalibrating(false);
+    }
+  }, [calibrationFiles]);
+
+  // ---- Candidate Preview (count only, no resumes) ----
+  const fetchCandidatePreview = useCallback(async () => {
+    if (!session.greenhouseJobId) return;
+    setIsFetchingPreview(true);
+    try {
+      const res = await fetch('/api/greenhouse/candidates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId: session.greenhouseJobId, includeResumes: false }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCandidatePreview({
+          total: data.total,
+          withResumes: data.withResumes,
+        });
+      }
+    } catch {
+      // non-critical — preview is nice-to-have
+    } finally {
+      setIsFetchingPreview(false);
+    }
+  }, [session.greenhouseJobId]);
+
+  // Fetch candidate preview when entering Step 2
+  useEffect(() => {
+    if (currentStep === 2 && session.greenhouseJobId && !candidatePreview) {
+      fetchCandidatePreview();
+    }
+  }, [currentStep, session.greenhouseJobId, candidatePreview, fetchCandidatePreview]);
 
   // ---- Candidate Selection ----
   const handleToggleSelect = useCallback((id: string) => {
@@ -301,10 +457,10 @@ export default function Home() {
 
   const executeAction = useCallback(() => {
     if (!confirmAction) return;
-    const actionText = confirmAction.action === 'advance' ? 'advanced to screen' : 'rejected';
+    const actionText = confirmAction.action === 'advance' ? 'marked for advance' : 'marked for rejection';
     setActionMessage({
       type: 'success',
-      text: `${confirmAction.count} candidate${confirmAction.count === 1 ? '' : 's'} ${actionText} in Greenhouse`,
+      text: `${confirmAction.count} candidate${confirmAction.count === 1 ? '' : 's'} ${actionText} (Greenhouse writeback coming soon)`,
     });
     setTimeout(() => setActionMessage(null), 4000);
     setConfirmAction(null);
@@ -322,8 +478,17 @@ export default function Home() {
     [currentStep]
   );
 
-  // ---- Group candidates by tier ----
-  const candidatesByTier = session.candidates.reduce(
+  // ---- Group candidates by tier (with optional search filter) ----
+  const filteredCandidates = candidateSearchQuery.trim()
+    ? session.candidates.filter(
+        (c) =>
+          c.name.toLowerCase().includes(candidateSearchQuery.toLowerCase()) ||
+          c.currentRole?.toLowerCase().includes(candidateSearchQuery.toLowerCase()) ||
+          c.currentCompany?.toLowerCase().includes(candidateSearchQuery.toLowerCase())
+      )
+    : session.candidates;
+
+  const candidatesByTier = filteredCandidates.reduce(
     (acc, candidate) => {
       acc[candidate.tier].push(candidate);
       return acc;
@@ -345,14 +510,14 @@ export default function Home() {
       {/* Header */}
       <header className="border-b bg-card sticky top-0 z-40">
         <div className="max-w-6xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-chart-4 to-chart-1 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-chart-4 to-chart-1 flex items-center justify-center shrink-0">
                 <span className="text-white font-bold text-lg">R</span>
               </div>
               <div>
                 <h1 className="text-xl font-bold text-foreground">Rosie</h1>
-                <p className="text-xs text-muted-foreground">AI Resume Screening</p>
+                <p className="text-xs text-muted-foreground">Few-Shot Resume Scoring</p>
               </div>
             </div>
             <StepIndicator
@@ -370,7 +535,7 @@ export default function Home() {
         {actionMessage && (
           <div
             className={cn(
-              'fixed top-20 right-4 px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-3',
+              'fixed top-20 right-4 left-4 sm:left-auto px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-3 max-w-sm sm:max-w-none ml-auto',
               actionMessage.type === 'success'
                 ? 'bg-tier-top text-white'
                 : 'bg-destructive text-white',
@@ -385,6 +550,52 @@ export default function Home() {
             </button>
           </div>
         )}
+
+        {/* Discard Results Confirmation */}
+        <Dialog open={!!pendingNav} onOpenChange={(open) => !open && setPendingNav(null)}>
+          <DialogContent showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>Discard Scoring Results?</DialogTitle>
+              <DialogDescription>
+                {pendingNav?.step === 1
+                  ? 'Starting a new session will discard all scored candidates. This cannot be undone.'
+                  : 'Going back will discard your current scoring results. You can re-score after making changes.'}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setPendingNav(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  if (pendingNav?.step === 1) {
+                    setSession({
+                      jobTitle: '',
+                      jobDescription: '',
+                      intakeNotes: '',
+                      rubric: null,
+                      idealPatterns: null,
+                      candidates: [],
+                      status: 'setup',
+                    });
+                    setCurrentStep(1);
+                    setSelectedCandidates(new Set());
+                    setSelectedJobId(null);
+                    setScoringProgress({ completed: 0, total: 0, current: '', failed: 0 });
+                    setCandidateSearchQuery('');
+                  } else {
+                    setCurrentStep(pendingNav?.step || 2);
+                    setSession((prev) => ({ ...prev, status: pendingNav?.status || 'calibrating' }));
+                  }
+                  setPendingNav(null);
+                }}
+              >
+                Discard Results
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Confirmation Dialog */}
         <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
@@ -434,7 +645,7 @@ export default function Home() {
             <div>
               <h2 className="text-2xl font-bold text-foreground">Setup Requirements</h2>
               <p className="text-muted-foreground mt-2">
-                Select a Greenhouse job or paste a job description to get started.
+                Select a Greenhouse job to score candidates. The job description will auto-populate, or you can edit it manually.
               </p>
             </div>
 
@@ -550,16 +761,19 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col-reverse sm:flex-row items-start sm:items-center justify-between gap-3">
               <div className="text-sm text-muted-foreground">
-                {selectedJobId && session.jobDescription.trim() && (
+                {selectedJobId && session.jobDescription.trim() ? (
                   <span className="text-tier-top">Job loaded from Greenhouse</span>
-                )}
+                ) : !selectedJobId && session.jobDescription.trim() ? (
+                  <span className="text-tier-moderate">Select a Greenhouse job above to score candidates after rubric generation</span>
+                ) : null}
               </div>
               <Button
                 onClick={handleGenerateRubric}
                 disabled={!session.jobDescription.trim() || isGeneratingRubric}
                 size="lg"
+                className="w-full sm:w-auto"
               >
                 {isGeneratingRubric ? (
                   <>
@@ -577,138 +791,327 @@ export default function Home() {
         {/* ============ STEP 2: CALIBRATE ============ */}
         {currentStep === 2 && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-2xl font-bold text-foreground">Calibrate Scoring</h2>
-              <p className="text-muted-foreground mt-2">
-                Review the AI-generated rubric. The rubric defines how candidates will be scored.
-              </p>
-            </div>
+            {/* ---- Phase 1: Upload (before calibration) ---- */}
+            {!session.idealPatterns ? (
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Train Your Scoring Model</h2>
+                  <p className="text-muted-foreground mt-2">
+                    Upload the strongest resumes from your initial sourcing batch. The model will learn
+                    what &ldquo;good&rdquo; looks like for this role, then apply that to score your
+                    applicant pool.
+                  </p>
+                </div>
 
-            <div className="grid lg:grid-cols-2 gap-6">
-              {/* Rubric */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>Scoring Rubric</CardTitle>
-                    <Button variant="link" size="sm" onClick={() => setShowRubric(!showRubric)}>
-                      {showRubric ? 'Collapse' : 'Expand'}
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {session.rubric &&
-                    (showRubric ? (
-                      <RubricDisplay rubric={session.rubric} />
-                    ) : (
-                      <div className="space-y-2">
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {session.rubric.mustHaves.length}
-                          </span>{' '}
-                          must-have requirements
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {session.rubric.niceToHaves.length}
-                          </span>{' '}
-                          nice-to-have requirements
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {session.rubric.hiddenPreferences.length}
-                          </span>{' '}
-                          contextual signals from intake
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Target:{' '}
-                          <span className="font-medium text-foreground">
-                            {session.rubric.seniorityTarget}
-                          </span>
-                        </p>
-                      </div>
-                    ))}
-                </CardContent>
-              </Card>
-
-              {/* Ideal Candidates */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>
-                      Ideal Candidate Patterns{' '}
-                      <span className="text-muted-foreground font-normal">(optional)</span>
-                    </CardTitle>
-                    {session.idealPatterns && (
-                      <Button variant="link" size="sm" onClick={() => setShowPatterns(!showPatterns)}>
-                        {showPatterns ? 'Collapse' : 'Expand'}
-                      </Button>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {session.idealPatterns ? (
-                    showPatterns ? (
-                      <IdealPatternsDisplay patterns={session.idealPatterns} />
-                    ) : (
-                      <div className="space-y-2">
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {session.idealPatterns.commonSkills.length}
-                          </span>{' '}
-                          common skills identified
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {session.idealPatterns.careerPatterns.length}
-                          </span>{' '}
-                          career patterns
-                        </p>
-                      </div>
-                    )
-                  ) : (
-                    <div className="space-y-3">
-                      <p className="text-sm text-muted-foreground">
-                        Upload 2-5 resumes of your best hires in similar roles to teach the scoring
-                        model what &ldquo;good&rdquo; looks like. This is optional but improves
-                        accuracy.
+                {/* Upload Card — full width, hero position */}
+                <Card>
+                  <CardContent className="p-6">
+                    <div
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      className={cn(
+                        'w-full py-12 px-6 border-2 border-dashed rounded-lg text-center cursor-pointer transition-colors',
+                        isDragOver
+                          ? 'border-chart-1 bg-chart-1/5'
+                          : 'border-input hover:border-chart-1/50 hover:bg-muted/50',
+                      )}
+                    >
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept=".pdf,.docx,.doc,.txt"
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files) handleCalibrationFiles(e.target.files);
+                          e.target.value = '';
+                        }}
+                      />
+                      <Upload className="size-10 mx-auto mb-3 text-muted-foreground" />
+                      <p className="text-base font-medium text-foreground">
+                        Drop resumes here or click to browse
                       </p>
-                      <div className="w-full p-6 border-2 border-dashed rounded-lg text-center text-muted-foreground">
-                        <Upload className="size-8 mx-auto mb-2 opacity-50" />
-                        <p className="text-sm">Resume upload coming soon</p>
-                        <p className="text-xs mt-1">Scoring will proceed without calibration data</p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        PDF, DOCX, or TXT &bull; 2-10 resumes from top candidates you&rsquo;ve already reviewed
+                      </p>
+                    </div>
+
+                    {/* File list */}
+                    {calibrationFiles.length > 0 && (
+                      <div className="mt-4 space-y-3">
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                          {calibrationFiles.length} resume{calibrationFiles.length !== 1 ? 's' : ''} selected
+                        </p>
+                        <div className="space-y-1">
+                          {calibrationFiles.map((file, i) => (
+                            <div
+                              key={`${file.name}-${i}`}
+                              className="flex items-center justify-between bg-muted rounded-md px-3 py-2"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileText className="size-4 text-muted-foreground shrink-0" />
+                                <span className="text-sm text-foreground truncate">{file.name}</span>
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRemoveCalibrationFile(i); }}
+                                className="text-muted-foreground hover:text-destructive ml-2 shrink-0"
+                              >
+                                <X className="size-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        <Button
+                          onClick={(e) => { e.stopPropagation(); handleUploadCalibration(); }}
+                          disabled={isCalibrating}
+                          size="lg"
+                          className="w-full"
+                        >
+                          {isCalibrating ? (
+                            <>
+                              <Loader2 className="size-4 animate-spin" />
+                              Analyzing Resumes...
+                            </>
+                          ) : (
+                            `Train on ${calibrationFiles.length} Resume${calibrationFiles.length !== 1 ? 's' : ''}`
+                          )}
+                        </Button>
+                      </div>
+                    )}
+
+                    {calibrationError && (
+                      <div className="mt-4 p-3 bg-destructive/10 border border-destructive/30 rounded-md">
+                        <p className="text-sm text-destructive">{calibrationError}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setCurrentStep(1);
+                      setSession((prev) => ({ ...prev, status: 'setup' }));
+                    }}
+                  >
+                    <ChevronLeft className="size-4" />
+                    Back to Setup
+                  </Button>
+                </div>
+              </>
+            ) : (
+              /* ---- Phase 2: Scoring Summary (after calibration) ---- */
+              <>
+                <div>
+                  <h2 className="text-2xl font-bold text-foreground">Scoring Summary</h2>
+                  <p className="text-muted-foreground mt-2">
+                    Here&rsquo;s how candidates will be evaluated. Review before scoring.
+                  </p>
+                </div>
+
+                {/* Scoring Summary Card — full width */}
+                <Card>
+                  <CardContent className="p-6 space-y-6">
+                    {/* Calibration status */}
+                    <div className="flex items-center gap-3 p-3 bg-tier-top/10 rounded-lg">
+                      <CheckCircle2 className="size-5 text-tier-top shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-foreground">
+                          Calibrated with {calibrationFiles.length} resume{calibrationFiles.length !== 1 ? 's' : ''}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          The model has learned patterns from your top candidates
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto text-xs"
+                        onClick={() => {
+                          setSession((prev) => ({ ...prev, idealPatterns: null }));
+                          setCalibrationFiles([]);
+                        }}
+                      >
+                        Re-train
+                      </Button>
+                    </div>
+
+                    {/* Two-column: Rubric highlights + Learned patterns */}
+                    <div className="grid md:grid-cols-2 gap-6">
+                      {/* From Rubric */}
+                      <div>
+                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                          From Your Rubric
+                        </h3>
+                        {session.rubric && (
+                          <div className="space-y-2">
+                            {/* Top weighted requirements */}
+                            {[...session.rubric.mustHaves, ...session.rubric.niceToHaves]
+                              .sort((a, b) => b.weight - a.weight)
+                              .slice(0, 5)
+                              .map((item, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                  <span className="text-xs font-mono text-muted-foreground w-8 shrink-0 pt-0.5">
+                                    {item.weight}%
+                                  </span>
+                                  <span className="text-sm text-foreground">{item.requirement}</span>
+                                </div>
+                              ))}
+                            {session.rubric.mustHaves.length + session.rubric.niceToHaves.length > 5 && (
+                              <p className="text-xs text-muted-foreground pl-10">
+                                +{session.rubric.mustHaves.length + session.rubric.niceToHaves.length - 5} more
+                              </p>
+                            )}
+                            <div className="pt-2">
+                              <p className="text-xs text-muted-foreground">
+                                Target: <span className="text-foreground">{session.rubric.seniorityTarget}</span>
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* From Calibration */}
+                      <div>
+                        <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
+                          Learned from Calibration
+                        </h3>
+                        <div className="space-y-3">
+                          {/* Top skills */}
+                          {session.idealPatterns.commonSkills.length > 0 && (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1.5">Key skills</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {session.idealPatterns.commonSkills
+                                  .filter((s) => s.frequency === 'all' || s.frequency === 'most')
+                                  .slice(0, 8)
+                                  .map((s, i) => (
+                                    <span
+                                      key={i}
+                                      className="px-2 py-0.5 bg-muted rounded text-xs text-foreground"
+                                    >
+                                      {s.skill}
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Top patterns */}
+                          {session.idealPatterns.careerPatterns.length > 0 && (
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1.5">Career patterns</p>
+                              <ul className="space-y-1">
+                                {session.idealPatterns.careerPatterns
+                                  .filter((p) => p.frequency === 'all' || p.frequency === 'most')
+                                  .slice(0, 3)
+                                  .map((p, i) => (
+                                    <li key={i} className="text-sm text-foreground flex items-start gap-1.5">
+                                      <span className="text-muted-foreground mt-1">-</span>
+                                      {p.pattern}
+                                    </li>
+                                  ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
 
-            <div className="flex justify-between items-center">
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setCurrentStep(1);
-                  setSession((prev) => ({ ...prev, status: 'setup' }));
-                }}
-              >
-                <ChevronLeft className="size-4" />
-                Back to Setup
-              </Button>
-              <div className="flex items-center gap-3">
-                {!session.greenhouseJobId && (
-                  <p className="text-sm text-tier-moderate">
-                    No Greenhouse job selected — select a job in Setup to score real candidates
-                  </p>
-                )}
-                <Button
-                  onClick={handleStartScoring}
-                  disabled={!session.greenhouseJobId || isScoring}
-                  size="lg"
-                >
-                  Start Scoring Candidates
-                </Button>
-              </div>
-            </div>
+                    {/* Expandable full rubric detail */}
+                    <div className="border-t pt-4">
+                      <button
+                        onClick={() => setShowRubricDetail(!showRubricDetail)}
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <ChevronDown
+                          className={cn('size-4 transition-transform', showRubricDetail && 'rotate-180')}
+                        />
+                        {showRubricDetail ? 'Hide' : 'View'} full rubric detail
+                      </button>
+                      {showRubricDetail && session.rubric && (
+                        <div className="mt-4">
+                          <RubricDisplay rubric={session.rubric} />
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Candidate Preview + Score CTA */}
+                <Card>
+                  <CardContent className="p-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <Users className="size-5 text-muted-foreground" />
+                        <div>
+                          {isFetchingPreview ? (
+                            <p className="text-sm text-muted-foreground flex items-center gap-2">
+                              <Loader2 className="size-3 animate-spin" />
+                              Checking applicant pool...
+                            </p>
+                          ) : candidatePreview ? (
+                            <>
+                              <p className="text-sm font-medium text-foreground">
+                                {candidatePreview.total} candidate{candidatePreview.total !== 1 ? 's' : ''} in Application Review
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Applicants only (not sourced)
+                              </p>
+                            </>
+                          ) : !session.greenhouseJobId ? (
+                            <p className="text-sm text-tier-moderate">
+                              No Greenhouse job selected —{' '}
+                              <button
+                                className="underline hover:text-foreground"
+                                onClick={() => {
+                                  setCurrentStep(1);
+                                  setSession((prev) => ({ ...prev, status: 'setup' }));
+                                }}
+                              >
+                                go back to Setup
+                              </button>
+                            </p>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              Ready to score candidates
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        onClick={handleStartScoring}
+                        disabled={!session.greenhouseJobId || isScoring}
+                        size="lg"
+                        className="w-full sm:w-auto"
+                      >
+                        {candidatePreview
+                          ? `Score ${candidatePreview.total} Candidate${candidatePreview.total !== 1 ? 's' : ''}`
+                          : 'Score Candidates'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setCurrentStep(1);
+                      setSession((prev) => ({ ...prev, status: 'setup' }));
+                    }}
+                  >
+                    <ChevronLeft className="size-4" />
+                    Back to Setup
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -747,7 +1150,7 @@ export default function Home() {
         {/* ============ STEP 4: RESULTS ============ */}
         {currentStep === 4 && (
           <div className="space-y-8">
-            <div className="flex items-start justify-between">
+            <div className="flex flex-col sm:flex-row items-start justify-between gap-4">
               <div>
                 <h2 className="text-2xl font-bold text-foreground">Screening Results</h2>
                 <p className="text-muted-foreground mt-1">
@@ -757,14 +1160,11 @@ export default function Home() {
                   )}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    setCurrentStep(2);
-                    setSession((prev) => ({ ...prev, status: 'calibrating' }));
-                  }}
+                  onClick={() => setPendingNav({ step: 2, status: 'calibrating' })}
                 >
                   Back to Calibrate
                 </Button>
@@ -818,7 +1218,47 @@ export default function Home() {
 
             <ResultsSummary candidates={session.candidates} />
 
+            {/* Candidate search */}
+            {session.candidates.length > 5 && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Input
+                  value={candidateSearchQuery}
+                  onChange={(e) => setCandidateSearchQuery(e.target.value)}
+                  placeholder="Search candidates by name, role, or company..."
+                  className="pl-9"
+                />
+              </div>
+            )}
+
             <div className="space-y-6">
+              {candidateSearchQuery.trim() && filteredCandidates.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground">
+                  <p className="text-sm">No candidates match &ldquo;{candidateSearchQuery}&rdquo;</p>
+                  <button
+                    className="text-sm text-chart-1 hover:underline mt-1"
+                    onClick={() => setCandidateSearchQuery('')}
+                  >
+                    Clear search
+                  </button>
+                </div>
+              )}
+              {session.candidates.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground">
+                  <p>No candidates were scored successfully.</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => {
+                      setCurrentStep(2);
+                      setSession((prev) => ({ ...prev, status: 'calibrating' }));
+                    }}
+                  >
+                    Back to Calibrate
+                  </Button>
+                </div>
+              )}
               {(['top', 'strong', 'moderate', 'below'] as Tier[]).map((tier) => (
                 <TierSection
                   key={tier}
@@ -836,21 +1276,7 @@ export default function Home() {
             <div className="border-t pt-8 flex justify-center">
               <Button
                 variant="ghost"
-                onClick={() => {
-                  setSession({
-                    jobTitle: '',
-                    jobDescription: '',
-                    intakeNotes: '',
-                    rubric: null,
-                    idealPatterns: null,
-                    candidates: [],
-                    status: 'setup',
-                  });
-                  setCurrentStep(1);
-                  setSelectedCandidates(new Set());
-                  setSelectedJobId(null);
-                  setScoringProgress({ completed: 0, total: 0, current: '', failed: 0 });
-                }}
+                onClick={() => setPendingNav({ step: 1, status: 'setup' })}
               >
                 Start New Screening Session
               </Button>

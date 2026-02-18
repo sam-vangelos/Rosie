@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { scoreCandidate } from '@/lib/anthropic';
 import { ScoringRubric, IdealPatterns, Tier } from '@/lib/types';
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function assignTier(score: number): Tier {
   if (score >= 9.0) return 'top';

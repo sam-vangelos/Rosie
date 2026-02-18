@@ -180,8 +180,17 @@ export async function downloadAttachment(
 
     let extractedText: string | null = null;
 
-    // Extract text from DOCX files since Claude can't read them directly
-    if (isDocx) {
+    // Extract text locally — pdf-parse for PDFs, mammoth for DOCX
+    if (isPdf) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const pdfParse = require('pdf-parse/lib/pdf-parse');
+        const result = await pdfParse(Buffer.from(buffer));
+        extractedText = result.text;
+      } catch {
+        extractedText = null;
+      }
+    } else if (isDocx) {
       try {
         const result = await mammoth.extractRawText({ buffer: Buffer.from(buffer) });
         extractedText = result.value;
