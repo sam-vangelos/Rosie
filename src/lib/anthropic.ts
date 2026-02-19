@@ -91,6 +91,7 @@ export async function generateRubric(
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4096,
+      temperature: 0,
       messages: [
         {
           role: 'user',
@@ -104,9 +105,9 @@ ${intakeNotes || 'No intake notes provided.'}
 
 ## Your Task
 
-Analyze this role and produce a scoring rubric with two parts:
+Analyze this role and produce a scoring rubric with two parts. Read the HARD CONSTRAINTS section carefully before generating any criteria.
 
-### Part 1: Discriminative Criteria (3-5 criteria)
+### Part 1: Discriminative Criteria (3-4 criteria)
 
 Each criterion must represent a dimension where candidates will MEANINGFULLY DIFFER. These are NOT generic categories like "technical skills" or "experience level" — they are specific, role-relevant signals.
 
@@ -124,6 +125,13 @@ Each criterion needs:
   - **high** (9-10): What the top 5% of candidates look like on this dimension
   - **mid** (6-8): What an adequate candidate looks like
   - **low** (1-5): What a weak or missing signal looks like
+
+## HARD CONSTRAINTS (violations = rubric failure)
+- Every criterion MUST be specific to this exact role. Test: if the criterion would make sense on a rubric for a different job title, it fails and must be replaced.
+- Generic engineering skills are NEVER criteria. Team leadership, full-stack design, operational excellence, system design, project management, client relationships, scaled operations — these are table stakes or irrelevant. Never score them.
+- At least 60% of total weight MUST go to the core technical specialization described in the JD and intake notes.
+- Maximum 3-4 criteria. Fewer criteria = less room for filler.
+- Before outputting, self-check: "Would these exact criteria appear on any other job's rubric?" If yes, revise until they would not.
 
 Rules for criteria:
 - Each criterion should produce a SPREAD of scores across a typical applicant pool. If 80% of applicants would score the same, it's not discriminative.
@@ -172,6 +180,7 @@ export async function calibrateRubric(
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4096,
+      temperature: 0,
       messages: [
         {
           role: 'user',
@@ -194,11 +203,13 @@ The exemplar resumes reveal what "great" actually looks like for this role. Use 
 
 2. **Adjust weights**: If the exemplars reveal that certain criteria matter more (or less) than the initial rubric assumed, adjust weights. Weights must still sum to 100.
 
-3. **Add/remove criteria**: If the exemplars reveal a discriminative signal not captured by the current criteria, add it (and remove a less useful one to stay at 3-5 total). If a current criterion doesn't actually discriminate given what the exemplars show, remove it.
+3. **Add/remove criteria**: If the exemplars reveal a discriminative signal not captured by the current criteria, add it (and remove a less useful one to stay at 3-4 total). If a current criterion doesn't actually discriminate given what the exemplars show, remove it.
 
-4. **Update table stakes**: If the exemplars reveal that a currently-scored criterion is actually table stakes (all exemplars have it, so it doesn't discriminate), move it to table stakes.
+4. **Strip generic criteria**: Any criterion that would make sense on a rubric for a different job title MUST be removed or replaced with a role-specific alternative. Generic engineering skills (team leadership, full-stack design, operational excellence, system design, project management, client relationships, scaled operations) are NEVER criteria — move them to table stakes or delete them. At least 60% of total weight must go to the core technical specialization.
 
-5. **Write a calibration summary**: A plain-English explanation (2-4 sentences) of how the exemplar resumes shifted the scoring model. This is shown to the recruiter so they understand what changed. Example: "Based on your 3 exemplar resumes, the model will prioritize candidates who progressed from ML research into applied RL infrastructure, with particular weight on frontier lab experience. Candidates with pure SWE backgrounds but no RL research exposure will score significantly lower."
+5. **Update table stakes**: If the exemplars reveal that a currently-scored criterion is actually table stakes (all exemplars have it, so it doesn't discriminate), move it to table stakes.
+
+6. **Write a calibration summary**: A plain-English explanation (2-4 sentences) of how the exemplar resumes shifted the scoring model. This is shown to the recruiter so they understand what changed. Example: "Based on your 3 exemplar resumes, the model will prioritize candidates who progressed from ML research into applied RL infrastructure, with particular weight on frontier lab experience. Candidates with pure SWE backgrounds but no RL research exposure will score significantly lower."
 
 Respond with ONLY valid JSON matching this schema:
 {
@@ -360,6 +371,7 @@ Respond with ONLY valid JSON:
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 1500,
+      temperature: 0,
       messages: [{ role: 'user', content }],
     });
 
