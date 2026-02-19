@@ -1,93 +1,83 @@
-# Rosie — Few-Shot Resume Scoring
+# Rosie — Discriminative Resume Scoring
 
-Rosie uses few-shot learning to score resumes. It generates a structured rubric from a job description, optionally calibrates against top-performer resumes, then scores every applicant against that rubric using Claude — producing tier-ranked results with per-dimension reasoning.
+Rosie scores resumes against role-specific discriminative criteria. It generates a rubric from a job description, optionally calibrates against top-performer resumes, then scores every applicant against that rubric using Claude — producing tier-ranked results with per-criterion evidence.
 
-The core idea: instead of keyword matching or embedding similarity, give the model a rubric and examples of what "good" looks like, then let it evaluate each resume the way a trained recruiter would.
+The core idea: instead of keyword matching or generic dimensions, identify the 3-4 signals that separate the top 5% of candidates for *this specific role*, then score every resume against those signals.
 
 **[Live Demo](https://rosie-prototype.vercel.app)**
 
 ---
 
-## How Few-Shot Scoring Works
+## How It Works
 
-Traditional resume screening is either manual (slow, inconsistent) or automated via keyword/embedding matching (brittle, no reasoning). Few-shot scoring sits between the two:
+1. **Rubric generation** — Claude reads a job description + recruiter intake notes and produces 3-4 discriminative criteria: role-specific signals where candidates will meaningfully differ. Generic skills (team leadership, system design, project management) are excluded as table stakes.
 
-1. **Rubric generation** — Claude reads a job description + recruiter intake notes and produces a structured scoring rubric: weighted must-haves, nice-to-haves, contextual signals, and hidden preferences (team dynamics, working style, growth expectations)
+2. **Calibration** *(optional)* — Upload resumes from known top performers. Rosie extracts recurring patterns (skills, career trajectories, achievement signals) and uses them to sharpen the rubric — adjusting scoring guides, weights, and criteria based on what "great" actually looks like.
 
-2. **Calibration** *(optional)* — Upload resumes from known top performers. Rosie extracts recurring patterns (skills, experience profiles, career trajectories) and feeds them to the scoring prompt as few-shot examples — anchoring the model's sense of "what good looks like" for this specific role
+3. **Per-candidate scoring** — Claude reads each resume natively (PDF as document blocks, DOCX via text extraction) and scores it against each criterion with specific evidence cited from the resume. Scores require explicit proof — no inferences from job titles or company names alone.
 
-3. **Per-candidate scoring** — Claude reads each resume natively (PDF as document blocks, DOCX via text extraction) and scores it against the rubric across 4 weighted dimensions, producing a composite score + natural-language reasoning
-
-4. **Tier ranking** — Candidates are bucketed into actionable tiers (advance, review, borderline, reject) based on score thresholds
-
-The rubric is generated once. Calibration is done once. Then every candidate is scored against the same standard — consistently, with full reasoning.
+4. **Tier ranking** — A weighted average is computed in code (not by Claude), and candidates are bucketed into actionable tiers.
 
 ```
-                              ┌─────────────────────────┐
-                              │   Job Description +     │
-                              │   Recruiter Intake Notes │
-                              └────────────┬────────────┘
-                                           │
-                                           ▼
-                              ┌─────────────────────────┐
-                              │   RUBRIC GENERATION     │
-                              │   Claude → structured   │
-                              │   scoring criteria      │
-                              │   (must-haves, weights, │
-                              │    hidden preferences)  │
-                              └────────────┬────────────┘
-                                           │
-              ┌────────────────────────────┤
-              │                            │
-              ▼                            ▼
-┌──────────────────────┐     ┌─────────────────────────┐
-│  FEW-SHOT CALIBRATION│     │   PER-CANDIDATE SCORING │
-│  (optional)          │     │                         │
-│  Top-performer       │────▶│   Resume (PDF/DOCX)     │
-│  resumes → extract   │     │     + Rubric            │
-│  ideal patterns      │     │     + Ideal patterns    │
-└──────────────────────┘     │     → Claude → scores   │
-                             │       + reasoning       │
-                             └────────────┬────────────┘
-                                          │
-                                          ▼
-                             ┌─────────────────────────┐
-                             │   TIER-RANKED RESULTS   │
-                             │   Top · Strong ·        │
-                             │   Moderate · Below      │
-                             └─────────────────────────┘
+                              +---------------------------+
+                              |   Job Description +       |
+                              |   Recruiter Intake Notes  |
+                              +-------------+-------------+
+                                            |
+                                            v
+                              +---------------------------+
+                              |   RUBRIC GENERATION       |
+                              |   Claude -> 3-4           |
+                              |   discriminative criteria |
+                              |   + table stakes          |
+                              +-------------+-------------+
+                                            |
+              +-----------------------------+
+              |                             |
+              v                             v
++------------------------+    +---------------------------+
+|  CALIBRATION (optional)|    |   PER-CANDIDATE SCORING   |
+|                        |    |                           |
+|  Top-performer resumes +--->|   Resume (PDF/DOCX)       |
+|  -> extract patterns   |    |     + Rubric              |
+|  -> sharpen rubric     |    |     + Calibration context  |
++------------------------+    |     -> Claude -> scores   |
+                              |       + evidence          |
+                              +-------------+-------------+
+                                            |
+                                            v
+                              +---------------------------+
+                              |   TIER-RANKED RESULTS     |
+                              |   Top - Strong -          |
+                              |   Moderate - Below        |
+                              +---------------------------+
 ```
 
 ---
 
 ## Scoring Model
 
-Each candidate is scored on 4 dimensions (0-10):
+Each candidate is scored on 3-4 **discriminative criteria** generated per-role (0-10 per criterion). Criteria are specific to the exact job — e.g., for a Senior CV Engineer role:
 
-| Dimension | What It Measures |
-|-----------|-----------------|
-| **Technical** | Skills match against rubric requirements, weighted by importance |
-| **Experience** | Depth, relevance, company types, role scope, progression |
-| **Alignment** | Fit with hidden preferences from intake — team culture, working style, what the hiring manager actually wants but didn't put in the JD |
-| **Growth** | Career trajectory, upward mobility, learning velocity |
+| Criterion | Weight |
+|-----------|--------|
+| Research-to-Production Edge Deployment | 35% |
+| Adverse Condition & Edge Case Robustness | 25% |
+| Multi-Modal Sensor Fusion for 3D Perception | 25% |
+| Sim-to-Real Transfer & Synthetic Data Pipelines | 15% |
 
-The overall score uses a **weighted average** — technical and experience are weighted heavier based on rubric weights. Candidates are bucketed into tiers:
+Generic skills that any qualified candidate would have are listed as **table stakes** and not scored.
+
+The overall score is a **weighted average** computed in code (deterministic, not by Claude). Candidates are bucketed into tiers:
 
 | Tier | Score Range | Action |
 |------|------------|--------|
 | Top Tier | 9.0 - 10 | Advance to screen |
 | Strong | 8.0 - 8.9 | Review individually |
 | Moderate | 7.0 - 7.9 | Borderline — review or pass |
-| Below Threshold | < 7.0 | Bulk reject |
+| Below Threshold | < 7.0 | Pass |
 
-Each score comes with natural-language reasoning — not just a number, but *why* this candidate scored where they did on each dimension.
-
-### Anti-Bias Design
-
-The scoring prompt explicitly instructs Claude:
-> Do NOT penalize for demographics, school prestige, or company brand. Score on demonstrated skills and experience.
-
-The model evaluates what candidates *can do*, not where they went to school or which logo is on their resume.
+Each score comes with cited evidence from the resume — a specific project, metric, system, or technique. No generic "has relevant experience" allowed.
 
 ---
 
@@ -103,6 +93,7 @@ rosie-prototype/
 │   │   │   │   └── candidates/route.ts  # POST fetch candidates + resumes
 │   │   │   ├── rubric/
 │   │   │   │   └── generate/route.ts    # POST JD → Claude → rubric JSON
+│   │   │   ├── calibrate/route.ts       # POST resumes + rubric → calibrated rubric
 │   │   │   └── score/route.ts           # POST resume + rubric → Claude → scores
 │   │   ├── globals.css                  # Design system tokens (light/dark)
 │   │   ├── layout.tsx                   # Geist font, ThemeProvider
@@ -118,17 +109,18 @@ rosie-prototype/
 │   │   │   ├── textarea.tsx
 │   │   │   └── alert.tsx
 │   │   ├── StepIndicator.tsx            # 4-step progress nav
-│   │   ├── CandidateCard.tsx            # Expandable score + reasoning card
-│   │   ├── TierSection.tsx              # Collapsible tier group with bulk actions
+│   │   ├── CandidateCard.tsx            # Expandable score + evidence card
+│   │   ├── TierSection.tsx              # Collapsible tier group
 │   │   ├── ScoreRing.tsx                # SVG radial score visualization
 │   │   ├── ScoringProgress.tsx          # Live scoring progress
 │   │   ├── ResultsSummary.tsx           # Stats + tier distribution chart
-│   │   ├── RubricDisplay.tsx            # Rubric viewer (must-haves, weights)
-│   │   ├── IdealPatternsDisplay.tsx     # Few-shot pattern viewer
+│   │   ├── RubricDisplay.tsx            # Rubric criteria viewer
+│   │   ├── IdealPatternsDisplay.tsx     # Calibration pattern viewer
 │   │   └── TierBadge.tsx                # Color-coded tier label
 │   └── lib/
 │       ├── greenhouse.ts                # ATS integration (Greenhouse Harvest API v1)
-│       ├── anthropic.ts                 # Claude scoring + rubric generation
+│       ├── anthropic.ts                 # Claude calls: generateRubric, extractPatterns,
+│       │                                #   calibrateRubric, scoreCandidate, computeOverallScore
 │       ├── types.ts                     # TypeScript interfaces
 │       └── utils.ts                     # cn() helper (clsx + tailwind-merge)
 ```
@@ -137,11 +129,11 @@ rosie-prototype/
 
 **Native PDF reading**: Resumes are sent to Claude as [document blocks](https://docs.anthropic.com/en/docs/build-with-claude/pdf-support) (base64 encoded) — no OCR, no text extraction, no information loss. Claude reads the PDF directly. DOCX files fall back to text extraction via [mammoth](https://github.com/mbrn/mammoth.js).
 
-**Rubric as a first-class object**: The rubric isn't a hidden prompt — it's a structured JSON artifact the recruiter can inspect and tune before scoring begins. This makes the scoring process transparent and auditable.
+**Rubric as a first-class object**: The rubric isn't a hidden prompt — it's a structured JSON artifact the recruiter can inspect before scoring begins. This makes the scoring process transparent and auditable.
 
-**Sequential scoring with real-time progress**: Candidates are scored one at a time so the UI shows live progress and the user can cancel mid-run. Batch parallelism would be faster but sacrifices the progress UX and makes cancellation messy.
+**Deterministic scoring**: The weighted average is computed in code (`computeOverallScore`), not by Claude. Same criterion scores always produce the same overall score. Claude calls use `temperature: 0` for structured outputs.
 
-**Few-shot calibration via pattern extraction**: Rather than stuffing full resumes into the scoring prompt, Rosie extracts recurring patterns from top-performer resumes (skills, experience profiles, career shapes) and passes those as structured few-shot examples. This keeps the per-candidate context window focused.
+**Calibration via pattern extraction**: Rather than stuffing full resumes into the scoring prompt, Rosie extracts recurring patterns from top-performer resumes and uses the calibration summary as narrative context. This keeps the per-candidate context window focused.
 
 ---
 
@@ -163,13 +155,13 @@ rosie-prototype/
 
 - Node.js 18+
 - An [Anthropic API key](https://console.anthropic.com/)
-- A [Greenhouse Harvest API key](https://developers.greenhouse.io/harvest.html#authentication) (v1, Basic Auth) — or any ATS that exposes jobs + candidate resumes
+- A [Greenhouse Harvest API key](https://developers.greenhouse.io/harvest.html#authentication) (v1, Basic Auth)
 
 ### Setup
 
 ```bash
-git clone https://github.com/sam-vangelos/rosie-prototype.git
-cd rosie-prototype
+git clone https://github.com/sam-vangelos/Rosie.git
+cd Rosie
 npm install
 ```
 
@@ -190,7 +182,6 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Roadmap
 
-- [ ] Ideal resume upload (few-shot calibration with top-performer resumes)
 - [ ] ATS writeback (advance/reject candidates via Greenhouse API)
 - [ ] Session persistence (save/resume scoring sessions)
 - [ ] Batch scoring with configurable concurrency

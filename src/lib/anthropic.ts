@@ -339,8 +339,8 @@ export async function scoreCandidate(
    - 1-5: ${c.scoringGuide.low}`)
       .join('\n\n');
 
-    const patternsSection = idealPatterns
-      ? `\n## Calibration Patterns (from top performers in similar roles)\n${JSON.stringify(idealPatterns, null, 2)}\n\nCandidates matching these patterns should receive a scoring boost on relevant criteria.`
+    const patternsSection = rubric.calibrationSummary
+      ? `\n## What the exemplar resumes demonstrated\n${rubric.calibrationSummary}\n\nCandidates matching these patterns should score higher. Candidates who do NOT match these patterns — especially on skills tagged 'all' frequency — should score significantly lower on the relevant criterion.`
       : '';
 
     content.push({
@@ -352,7 +352,9 @@ ${criteriaInstructions}
 ${patternsSection}
 
 ## Rules
-- Score 0-10 (one decimal). 9-10 = exceptional, 6-8 = adequate, 1-5 = weak. No evidence = score 3-4.
+- Score 0-10 (one decimal). 9-10 = exceptional, 6-8 = adequate, 1-5 = weak. If the resume contains no specific, explicit evidence for a criterion, score 3 or below. Do not infer capabilities from job titles or company names alone. "Works at DeepMind" is not evidence of RL depth.
+- Apply the scoring guides strictly. Read the 9-10, 6-8, and 1-5 descriptions for each criterion. A score of 9-10 requires the candidate to match the 9-10 description with multiple specific examples. A single mention or bullet point is 6-8 at most. Do not round up.
+- Evidence must cite specific text from the resume — a project name, a metric, a system built, a technique used. If your evidence is generic (e.g., "has relevant experience"), your score is too high.
 - Evidence: ONE sentence max. Cite specific facts (job title, company, project, metric). No filler.
 - Strengths/gaps: short phrases, 8-10 words max each. Example: "6 yrs frontier lab RL (Google, DeepMind)"
 - Extract currentRole and currentCompany from their MOST RECENT position in the resume.
