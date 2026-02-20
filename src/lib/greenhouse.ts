@@ -164,7 +164,10 @@ export async function downloadAttachment(
 ): Promise<{ base64: string; mimeType: string; extractedText: string | null } | null> {
   try {
     const res = await fetch(url);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`[downloadAttachment] HTTP ${res.status} downloading "${filename}" from ${url.slice(0, 80)}...`);
+      return null;
+    }
 
     const contentType = res.headers.get('content-type') || 'application/octet-stream';
     const buffer = await res.arrayBuffer();
@@ -187,14 +190,16 @@ export async function downloadAttachment(
         const pdfParse = require('pdf-parse/lib/pdf-parse');
         const result = await pdfParse(Buffer.from(buffer));
         extractedText = result.text;
-      } catch {
+      } catch (err) {
+        console.error(`[downloadAttachment] PDF text extraction failed for "${filename}":`, err instanceof Error ? err.message : err);
         extractedText = null;
       }
     } else if (isDocx) {
       try {
         const result = await mammoth.extractRawText({ buffer: Buffer.from(buffer) });
         extractedText = result.value;
-      } catch {
+      } catch (err) {
+        console.error(`[downloadAttachment] DOCX text extraction failed for "${filename}":`, err instanceof Error ? err.message : err);
         extractedText = null;
       }
     }
@@ -204,7 +209,8 @@ export async function downloadAttachment(
       mimeType: isPdf ? 'application/pdf' : contentType,
       extractedText,
     };
-  } catch {
+  } catch (err) {
+    console.error(`[downloadAttachment] Failed to download "${filename}":`, err instanceof Error ? err.message : err);
     return null;
   }
 }

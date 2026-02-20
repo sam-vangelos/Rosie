@@ -203,6 +203,7 @@ export default function Home() {
   }, [session.jobDescription, session.intakeNotes]);
 
   // ---- Candidate Scoring Pipeline ----
+  // Batched: fetch metadata → process resumes in batches of 10 → score each batch
   const handleStartScoring = useCallback(async () => {
     setCurrentStep(3);
     setSession((prev) => ({ ...prev, status: 'scoring' }));
@@ -210,30 +211,33 @@ export default function Home() {
     scoringAbortRef.current = false;
 
     try {
+      // Phase 1: Fetch candidate metadata (no resume downloads — fast)
       setIsFetchingCandidates(true);
       setScoringProgress({ completed: 0, total: 0, current: 'Fetching candidates from Greenhouse...', failed: 0 });
 
-      const candidatesRes = await fetch('/api/greenhouse/candidates', {
+      const metaRes = await fetch('/api/greenhouse/candidates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId: session.greenhouseJobId }),
       });
 
-      const candidatesText = await candidatesRes.text();
-      if (!candidatesRes.ok) {
+      const metaText = await metaRes.text();
+      if (!metaRes.ok) {
         let msg = 'Failed to fetch candidates from Greenhouse';
-        try { msg = JSON.parse(candidatesText).error || msg; } catch {}
+        try { msg = JSON.parse(metaText).error || msg; } catch {}
         throw new Error(msg);
       }
 
-      let candidatesData;
-      try { candidatesData = JSON.parse(candidatesText); } catch {
-        throw new Error(`Invalid response fetching candidates: ${candidatesText.slice(0, 200)}`);
+      let metaData;
+      try { metaData = JSON.parse(metaText); } catch {
+        throw new Error(`Invalid response fetching candidates: ${metaText.slice(0, 200)}`);
       }
-      const ghCandidates = candidatesData.candidates;
+
+      const candidateMetas = metaData.candidates;
+      const sessionId = metaData.sessionId;
       setIsFetchingCandidates(false);
 
-      if (ghCandidates.length === 0) {
+      if (candidateMetas.length === 0) {
         setError('No candidates found for this job in Greenhouse');
         setCurrentStep(2);
         setSession((prev) => ({ ...prev, status: 'calibrating' }));
@@ -241,56 +245,104 @@ export default function Home() {
         return;
       }
 
-      setScoringProgress({
-        completed: 0,
-        total: ghCandidates.length,
-        current: '',
-        failed: 0,
-      });
-
-      // Score candidates in parallel with concurrency limit
-      const CONCURRENCY = 5;
+      // Phase 2: Process resumes + score in interleaved batches
+      const PROCESS_BATCH_SIZE = 10;
+      const SCORE_CONCURRENCY = 5;
       const scoredCandidates: Candidate[] = [];
       let completed = 0;
       let failed = 0;
 
-      // Process in batches of CONCURRENCY
-      for (let batchStart = 0; batchStart < ghCandidates.length; batchStart += CONCURRENCY) {
+      setScoringProgress({ completed: 0, total: candidateMetas.length, current: '', failed: 0 });
+
+      const totalBatches = Math.ceil(candidateMetas.length / PROCESS_BATCH_SIZE);
+
+      for (let i = 0; i < candidateMetas.length; i += PROCESS_BATCH_SIZE) {
         if (scoringAbortRef.current) break;
 
-        const batch = ghCandidates.slice(batchStart, batchStart + CONCURRENCY);
-        const batchNames = batch.map((c: { name: string }) => c.name).join(', ');
-        setScoringProgress({ completed, total: ghCandidates.length, current: batchNames, failed });
+        const batch = candidateMetas.slice(i, i + PROCESS_BATCH_SIZE);
+        const batchNumber = Math.floor(i / PROCESS_BATCH_SIZE) + 1;
 
-        const results = await Promise.allSettled(
-          batch.map(async (ghCandidate: { name: string }) => {
-            const scoreRes = await fetch('/api/score', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                rubric: session.rubric,
-                idealPatterns: session.idealPatterns,
-                candidate: ghCandidate,
-              }),
-            });
+        // Step A: Download + extract text for this batch of resumes
+        setScoringProgress({
+          completed,
+          total: candidateMetas.length,
+          current: `Downloading resumes (batch ${batchNumber} of ${totalBatches})...`,
+          failed,
+        });
 
-            const scoreText = await scoreRes.text();
-            if (!scoreRes.ok) throw new Error(`HTTP ${scoreRes.status}: ${scoreText.slice(0, 100)}`);
-            const scoreData = JSON.parse(scoreText);
-            return scoreData.candidate as Candidate;
-          })
-        );
+        const processRes = await fetch('/api/greenhouse/candidates/process', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            candidateIds: batch.map((c: { id: number }) => c.id),
+          }),
+        });
 
-        for (const result of results) {
-          if (result.status === 'fulfilled') {
-            scoredCandidates.push(result.value);
-          } else {
-            failed++;
-            console.error(`Scoring failed:`, result.reason);
+        const processText = await processRes.text();
+        if (!processRes.ok) {
+          let msg = 'Failed to process candidate resumes';
+          try { msg = JSON.parse(processText).error || msg; } catch {}
+          throw new Error(msg);
+        }
+
+        let processData;
+        try { processData = JSON.parse(processText); } catch {
+          throw new Error(`Invalid response processing resumes: ${processText.slice(0, 200)}`);
+        }
+
+        const processedCandidates = processData.candidates;
+
+        // Log any processing errors (non-fatal — candidates scored without resume)
+        if (processData.errors?.length > 0) {
+          for (const err of processData.errors) {
+            console.warn(`Resume issue: ${err.name} (${err.candidateId}): ${err.error}`);
           }
         }
-        completed += batch.length;
-        setScoringProgress({ completed, total: ghCandidates.length, current: '', failed });
+
+        // Step B: Score this batch with concurrency limit
+        for (let j = 0; j < processedCandidates.length; j += SCORE_CONCURRENCY) {
+          if (scoringAbortRef.current) break;
+
+          const scoreBatch = processedCandidates.slice(j, j + SCORE_CONCURRENCY);
+          const names = scoreBatch.map((c: { name: string }) => c.name).join(', ');
+          setScoringProgress({
+            completed,
+            total: candidateMetas.length,
+            current: names,
+            failed,
+          });
+
+          const results = await Promise.allSettled(
+            scoreBatch.map(async (ghCandidate: { name: string }) => {
+              const scoreRes = await fetch('/api/score', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  rubric: session.rubric,
+                  idealPatterns: session.idealPatterns,
+                  candidate: ghCandidate,
+                }),
+              });
+
+              const scoreText = await scoreRes.text();
+              if (!scoreRes.ok) throw new Error(`HTTP ${scoreRes.status}: ${scoreText.slice(0, 100)}`);
+              const scoreData = JSON.parse(scoreText);
+              return scoreData.candidate as Candidate;
+            })
+          );
+
+          for (const result of results) {
+            if (result.status === 'fulfilled') {
+              scoredCandidates.push(result.value);
+            } else {
+              failed++;
+              console.error(`Scoring failed:`, result.reason);
+            }
+          }
+          completed += scoreBatch.length;
+          setScoringProgress({ completed, total: candidateMetas.length, current: '', failed });
+        }
       }
 
       scoredCandidates.sort((a, b) => b.overallScore - a.overallScore);

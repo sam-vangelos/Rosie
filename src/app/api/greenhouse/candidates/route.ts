@@ -1,23 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getCandidatesForJob, getResumeAttachment, downloadAttachment } from '@/lib/greenhouse';
+import { getCandidatesForJob, getResumeAttachment } from '@/lib/greenhouse';
+import { createSession, StoredCandidate } from '@/lib/processingStore';
+import { randomUUID } from 'crypto';
 
 export const maxDuration = 300;
-
-interface CandidateWithResume {
-  id: number;
-  name: string;
-  email: string;
-  company: string;
-  title: string;
-  applicationStatus: string;
-  currentStage: string;
-  appliedAt: string;
-  source: string;
-  resumeFilename: string | null;
-  resumeBase64: string | null;
-  resumeMimeType: string | null;
-  resumeText: string | null;
-}
 
 export async function POST(request: Request) {
   try {
@@ -45,74 +31,56 @@ export async function POST(request: Request) {
 
     console.log(`[candidates] Job ${jobId}: ${allCandidates.length} total → ${candidates.length} in Application Review (applicants only)`);
 
-    const results: CandidateWithResume[] = [];
-
-    for (const candidate of candidates) {
+    // Build candidate metadata with resume attachment info (no downloading)
+    const candidateData: StoredCandidate[] = candidates.map((candidate) => {
       const application = candidate.applications?.find((app) =>
         app.jobs?.some((j) => j.id === jobId)
       );
-
-      const email = candidate.email_addresses?.[0]?.value || '';
       const resumeAttachment = getResumeAttachment(candidate);
 
-      let resumeBase64: string | null = null;
-      let resumeMimeType: string | null = null;
-      let resumeText: string | null = null;
-
-      if (includeResumes && resumeAttachment) {
-        const downloaded = await downloadAttachment(
-          resumeAttachment.url,
-          resumeAttachment.filename
-        );
-        if (downloaded) {
-          // For PDFs, send base64 to Claude directly
-          // For DOCX, send extracted text
-          if (downloaded.mimeType === 'application/pdf') {
-            resumeBase64 = downloaded.base64;
-            resumeMimeType = downloaded.mimeType;
-          } else if (downloaded.extractedText) {
-            resumeText = downloaded.extractedText;
-            resumeMimeType = 'text/plain';
-          } else {
-            // Fallback: send base64 anyway, Claude may handle it
-            resumeBase64 = downloaded.base64;
-            resumeMimeType = downloaded.mimeType;
-          }
-        }
-      }
-
-      results.push({
+      return {
         id: candidate.id,
         name: `${candidate.first_name} ${candidate.last_name}`.trim(),
-        email,
+        email: candidate.email_addresses?.[0]?.value || '',
         company: candidate.company || '',
         title: candidate.title || '',
         applicationStatus: application?.status || 'unknown',
         currentStage: application?.current_stage?.name || 'Unknown',
         appliedAt: application?.applied_at || candidate.created_at,
         source: application?.source?.public_name || 'Unknown',
+        resumeUrl: resumeAttachment?.url || null,
         resumeFilename: resumeAttachment?.filename || null,
-        resumeBase64,
-        resumeMimeType,
-        resumeText,
-      });
+      };
+    });
 
-      // Small delay between downloads to avoid rate limits
-      if (includeResumes && resumeAttachment) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
+    const withResumes = candidateData.filter((c) => c.resumeUrl).length;
+
+    // Create processing session for batch resume downloading.
+    // Preview requests (includeResumes: false) skip session creation.
+    let sessionId: string | undefined;
+    if (includeResumes !== false) {
+      sessionId = randomUUID();
+      createSession(sessionId, candidateData);
     }
 
-    // Count resumes: if we downloaded, check content. Otherwise, check filename (attachment exists).
-    const hasResume = (c: CandidateWithResume) =>
-      c.resumeBase64 || c.resumeText || (!includeResumes && c.resumeFilename);
-    const withResumes = results.filter(hasResume).length;
-
     return NextResponse.json({
-      candidates: results,
-      total: results.length,
+      candidates: candidateData.map((c) => ({
+        id: c.id,
+        name: c.name,
+        email: c.email,
+        company: c.company,
+        title: c.title,
+        applicationStatus: c.applicationStatus,
+        currentStage: c.currentStage,
+        appliedAt: c.appliedAt,
+        source: c.source,
+        hasResume: !!c.resumeUrl,
+        resumeFilename: c.resumeFilename,
+      })),
+      total: candidateData.length,
       withResumes,
-      withoutResumes: results.length - withResumes,
+      withoutResumes: candidateData.length - withResumes,
+      ...(sessionId ? { sessionId } : {}),
     });
   } catch (error) {
     console.error('Greenhouse candidates error:', error);
