@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { getSessionCandidates, hasSession } from '@/lib/processingStore';
 import { downloadAttachment } from '@/lib/greenhouse';
 
 export const maxDuration = 300;
@@ -7,6 +6,20 @@ export const maxDuration = 300;
 // Truncate resume text to keep batch responses well under 1MB.
 // 50KB ≈ 12,500 words — more than enough for any resume.
 const MAX_TEXT_LENGTH = 50_000;
+
+interface InputCandidate {
+  id: number;
+  name: string;
+  email: string;
+  company: string;
+  title: string;
+  applicationStatus: string;
+  currentStage: string;
+  appliedAt: string;
+  source: string;
+  resumeUrl: string | null;
+  resumeFilename: string | null;
+}
 
 interface ProcessedCandidate {
   id: number;
@@ -26,27 +39,12 @@ interface ProcessedCandidate {
 
 export async function POST(request: Request) {
   try {
-    const { sessionId, candidateIds } = await request.json();
+    const { candidates } = await request.json() as { candidates: InputCandidate[] };
 
-    if (!sessionId || !Array.isArray(candidateIds) || candidateIds.length === 0) {
+    if (!Array.isArray(candidates) || candidates.length === 0) {
       return NextResponse.json(
-        { error: 'sessionId and candidateIds[] are required' },
+        { error: 'candidates[] is required' },
         { status: 400 }
-      );
-    }
-
-    if (!hasSession(sessionId)) {
-      return NextResponse.json(
-        { error: 'Processing session not found or expired' },
-        { status: 404 }
-      );
-    }
-
-    const candidates = getSessionCandidates(sessionId, candidateIds);
-    if (candidates.length === 0) {
-      return NextResponse.json(
-        { error: 'No matching candidates in session' },
-        { status: 404 }
       );
     }
 
@@ -69,7 +67,6 @@ export async function POST(request: Request) {
 
     for (const result of downloadResults) {
       if (result.status === 'rejected') {
-        // downloadAttachment catches internally, so this is unexpected
         console.error('[process] Unexpected download rejection:', result.reason);
         continue;
       }
@@ -80,15 +77,12 @@ export async function POST(request: Request) {
 
       if (downloaded) {
         if (downloaded.extractedText) {
-          // Text extraction succeeded — use extracted text for all formats.
-          // This keeps response size small (no base64 PDFs in the payload).
           resumeText = downloaded.extractedText;
           if (resumeText.length > MAX_TEXT_LENGTH) {
             resumeText = resumeText.slice(0, MAX_TEXT_LENGTH);
           }
           resumeMimeType = 'text/plain';
         } else {
-          // Text extraction failed (scanned PDF, corrupted file, etc.)
           console.warn(
             `[process] Text extraction failed for candidate ${candidate.id} (${candidate.name}), file: ${candidate.resumeFilename}`
           );
@@ -99,7 +93,6 @@ export async function POST(request: Request) {
           });
         }
       } else if (candidate.resumeUrl) {
-        // Had a URL but download returned null
         console.error(
           `[process] Resume download failed for candidate ${candidate.id} (${candidate.name}), file: ${candidate.resumeFilename}`
         );
@@ -121,7 +114,7 @@ export async function POST(request: Request) {
         appliedAt: candidate.appliedAt,
         source: candidate.source,
         resumeFilename: candidate.resumeFilename,
-        resumeBase64: null, // never sent in batch responses — text only
+        resumeBase64: null, // text only — keeps response small
         resumeMimeType,
         resumeText,
       });

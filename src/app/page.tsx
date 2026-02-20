@@ -203,7 +203,7 @@ export default function Home() {
   }, [session.jobDescription, session.intakeNotes]);
 
   // ---- Candidate Scoring Pipeline ----
-  // Batched: fetch metadata → process resumes in batches of 10 → score each batch
+  // Stateless batching: fetch metadata → client chunks batches → process + score each
   const handleStartScoring = useCallback(async () => {
     setCurrentStep(3);
     setSession((prev) => ({ ...prev, status: 'scoring' }));
@@ -234,7 +234,6 @@ export default function Home() {
       }
 
       const candidateMetas = metaData.candidates;
-      const sessionId = metaData.sessionId;
       setIsFetchingCandidates(false);
 
       if (candidateMetas.length === 0) {
@@ -246,6 +245,7 @@ export default function Home() {
       }
 
       // Phase 2: Process resumes + score in interleaved batches
+      // Client sends candidate objects directly — no server-side state
       const PROCESS_BATCH_SIZE = 10;
       const SCORE_CONCURRENCY = 5;
       const scoredCandidates: Candidate[] = [];
@@ -262,7 +262,7 @@ export default function Home() {
         const batch = candidateMetas.slice(i, i + PROCESS_BATCH_SIZE);
         const batchNumber = Math.floor(i / PROCESS_BATCH_SIZE) + 1;
 
-        // Step A: Download + extract text for this batch of resumes
+        // Step A: Send candidate objects to process endpoint for resume download + extraction
         setScoringProgress({
           completed,
           total: candidateMetas.length,
@@ -273,10 +273,7 @@ export default function Home() {
         const processRes = await fetch('/api/greenhouse/candidates/process', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sessionId,
-            candidateIds: batch.map((c: { id: number }) => c.id),
-          }),
+          body: JSON.stringify({ candidates: batch }),
         });
 
         const processText = await processRes.text();
@@ -466,7 +463,7 @@ export default function Home() {
       const res = await fetch('/api/greenhouse/candidates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: session.greenhouseJobId, includeResumes: false }),
+        body: JSON.stringify({ jobId: session.greenhouseJobId }),
       });
       if (res.ok) {
         const data = await res.json();

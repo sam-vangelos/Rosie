@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getCandidatesForJob, getResumeAttachment } from '@/lib/greenhouse';
-import { createSession, StoredCandidate } from '@/lib/processingStore';
-import { randomUUID } from 'crypto';
 
 export const maxDuration = 300;
 
 export async function POST(request: Request) {
   try {
-    const { jobId, includeResumes = true } = await request.json();
+    const { jobId } = await request.json();
     if (!jobId) {
       return NextResponse.json({ error: 'jobId is required' }, { status: 400 });
     }
@@ -32,7 +30,7 @@ export async function POST(request: Request) {
     console.log(`[candidates] Job ${jobId}: ${allCandidates.length} total → ${candidates.length} in Application Review (applicants only)`);
 
     // Build candidate metadata with resume attachment info (no downloading)
-    const candidateData: StoredCandidate[] = candidates.map((candidate) => {
+    const candidateData = candidates.map((candidate) => {
       const application = candidate.applications?.find((app) =>
         app.jobs?.some((j) => j.id === jobId)
       );
@@ -55,32 +53,11 @@ export async function POST(request: Request) {
 
     const withResumes = candidateData.filter((c) => c.resumeUrl).length;
 
-    // Create processing session for batch resume downloading.
-    // Preview requests (includeResumes: false) skip session creation.
-    let sessionId: string | undefined;
-    if (includeResumes !== false) {
-      sessionId = randomUUID();
-      createSession(sessionId, candidateData);
-    }
-
     return NextResponse.json({
-      candidates: candidateData.map((c) => ({
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        company: c.company,
-        title: c.title,
-        applicationStatus: c.applicationStatus,
-        currentStage: c.currentStage,
-        appliedAt: c.appliedAt,
-        source: c.source,
-        hasResume: !!c.resumeUrl,
-        resumeFilename: c.resumeFilename,
-      })),
+      candidates: candidateData,
       total: candidateData.length,
       withResumes,
       withoutResumes: candidateData.length - withResumes,
-      ...(sessionId ? { sessionId } : {}),
     });
   } catch (error) {
     console.error('Greenhouse candidates error:', error);
