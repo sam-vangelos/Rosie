@@ -1,0 +1,18 @@
+AVERY MORGAN
+Staff Machine Learning Engineer
+
+EXPERIENCE
+
+Example Systems - Staff Machine Learning Engineer
+2022-present
+- Built a production candidate-ranking platform serving 4 million profiles.
+- Reduced retrieval latency by 38% through hybrid sparse-dense search.
+- Led offline evaluation design and shipped drift monitoring for ranking quality.
+
+Prior Labs - Senior Software Engineer
+2018-2022
+- Designed event-driven data pipelines processing 2 billion records per day.
+- Improved model deployment reliability from 96.5% to 99.95%.
+
+SKILLS
+TypeScript, Python, PostgreSQL, information retrieval, evaluation systems

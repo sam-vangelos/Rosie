@@ -1,0 +1,13 @@
+.git
+node_modules
+.next
+.env*
+.vercel
+.claude
+.cursor
+__pycache__
+**/__pycache__
+.DS_Store
+**/.DS_Store
+*.tsbuildinfo
+npm-debug.log*

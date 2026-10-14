@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# Restart the Cloud SQL Auth Proxy that local development connects through.
+#
+# `npm run dev` talks to Cloud SQL through this proxy on 127.0.0.1:5433.
+# When the proxy dies — usually because Google credentials expired — every
+# query fails with a connection error. Run ./rosie-restart.
+#
+set -uo pipefail
+
+PORT=5433
+# Your Cloud SQL connection name, e.g. my-project:us-central1:my-instance.
+INSTANCE="${ROSIE_CLOUDSQL_INSTANCE:-${1:-}}"
+URL_FILE="${HOME}/.rosie-cloudsql-url"
+LOG_FILE="${HOME}/.rosie-cloudsql-proxy.log"
+
+if [ -z "$INSTANCE" ]; then
+  printf "Usage: ROSIE_CLOUDSQL_INSTANCE=project:region:instance ./rosie-restart\n"
+  printf "   or: ./rosie-restart project:region:instance\n"
+  exit 1
+fi
+
+bold=$'\033[1m'; green=$'\033[32m'; red=$'\033[31m'; yellow=$'\033[33m'; dim=$'\033[2m'; off=$'\033[0m'
+ok()   { printf "  ${green}✓${off} %s\n" "$1"; }
+bad()  { printf "  ${red}✗${off} %s\n" "$1"; }
+warn() { printf "  ${yellow}!${off} %s\n" "$1"; }
+step() { printf "\n${bold}%s${off}\n" "$1"; }
+
+find_bin() {
+  command -v "$1" 2>/dev/null && return 0
+  for p in "${HOME}/homebrew/bin/$1" "/opt/homebrew/bin/$1" "/usr/local/bin/$1" \
+           "${HOME}/google-cloud-sdk/bin/$1" \
+           "${HOME}/homebrew/opt/libpq/bin/$1" "/opt/homebrew/opt/libpq/bin/$1"; do
+    [ -x "$p" ] && { printf '%s\n' "$p"; return 0; }
+  done
+  return 1
+}
+
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/${PORT}") 2>/dev/null; }
+
+PROXY_BIN=$(find_bin cloud-sql-proxy) || {
+  bad "cloud-sql-proxy not found."
+  printf "    Install it with: ${bold}brew install cloud-sql-proxy${off}\n"
+  exit 1
+}
+GCLOUD_BIN=$(find_bin gcloud) || { bad "gcloud not found."; exit 1; }
+
+step "1. Checking Google credentials"
+# The proxy authenticates with Application Default Credentials. Org policies
+# commonly expire them periodically, and that is the usual reason it died.
+if ADC_ERR=$("$GCLOUD_BIN" auth application-default print-access-token 2>&1 >/dev/null); then
+  ok "application-default credentials are valid"
+else
+  bad "application-default credentials have expired"
+  printf "\n    Fix it by running this yourself, then re-run ./rosie-restart:\n"
+  printf "    ${bold}gcloud auth application-default login${off}\n"
+  printf "    ${dim}(tick every consent box, including Google Cloud data)${off}\n\n"
+  printf "    ${dim}%s${off}\n" "$(printf '%s' "$ADC_ERR" | head -1)"
+  exit 1
+fi
+
+step "2. Stopping any running proxy"
+PIDS=$(pgrep -f "cloud-sql-proxy.*${INSTANCE}" 2>/dev/null)
+if [ -n "$PIDS" ]; then
+  # shellcheck disable=SC2086
+  kill $PIDS 2>/dev/null
+  for _ in $(seq 1 20); do
+    pgrep -f "cloud-sql-proxy.*${INSTANCE}" >/dev/null 2>&1 || break
+    sleep 0.25
+  done
+  if pgrep -f "cloud-sql-proxy.*${INSTANCE}" >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    kill -9 $PIDS 2>/dev/null; sleep 0.5
+  fi
+  ok "stopped $(printf '%s' "$PIDS" | wc -w | tr -d ' ') process(es)"
+else
+  ok "none was running"
+fi
+
+if port_open; then
+  bad "something else is already listening on 127.0.0.1:${PORT}"
+  printf "    Identify it with: ${bold}lsof -i :${PORT}${off}\n"
+  exit 1
+fi
+
+step "3. Starting the proxy"
+: > "$LOG_FILE"; chmod 600 "$LOG_FILE"
+nohup "$PROXY_BIN" --port "$PORT" "$INSTANCE" >>"$LOG_FILE" 2>&1 &
+PROXY_PID=$!
+disown 2>/dev/null || true
+
+for _ in $(seq 1 40); do
+  port_open && break
+  kill -0 "$PROXY_PID" 2>/dev/null || break
+  sleep 0.25
+done
+
+if ! port_open; then
+  bad "the proxy did not come up"
+  printf "\n${dim}--- last lines of %s ---${off}\n" "$LOG_FILE"
+  tail -5 "$LOG_FILE" 2>/dev/null | sed 's/^/    /'
+  exit 1
+fi
+ok "listening on 127.0.0.1:${PORT} (pid ${PROXY_PID})"
+
+step "4. Verifying the database actually answers"
+# A listening socket only proves the proxy started; it does not prove Cloud SQL
+# is reachable or that the credentials work. Run a real query when we can.
+PSQL_BIN=$(find_bin psql || true)
+if [ -n "${PSQL_BIN:-}" ] && [ -r "$URL_FILE" ]; then
+  RUNS=$("$PSQL_BIN" "$(cat "$URL_FILE")" -tAc "select count(*) from rosie_runs;" 2>&1)
+  if printf '%s' "$RUNS" | grep -qE '^[0-9]+$'; then
+    ok "connected — ${RUNS} screening run(s) visible"
+  else
+    bad "the proxy is up but the query failed"
+    printf "    ${dim}%s${off}\n" "$(printf '%s' "$RUNS" | head -2 | tr '\n' ' ')"
+    exit 1
+  fi
+elif [ ! -r "$URL_FILE" ]; then
+  warn "no ${URL_FILE} — skipped the query check"
+else
+  warn "psql not installed — skipped the query check (brew install libpq)"
+fi
+
+printf "\n${green}${bold}Ready.${off} Start the app with ${bold}npm run dev${off}\n"
+printf "${dim}Proxy log: %s${off}\n" "$LOG_FILE"

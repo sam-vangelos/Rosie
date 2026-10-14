@@ -1,0 +1,718 @@
+{
+  "analyzeCalibrationResumes": {
+    "max_tokens": 6000,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "You are calibrating a resume-scoring model from a small set of exemplar resumes. Do two things in one pass:\n\n1. Extract the common patterns across the exemplar resumes.\n2. Rewrite the scoring rubric so it better reflects what the exemplar set shows great candidates actually look like.\n\n## Current Rubric\n{\n  \"criteria\": [\n    {\n      \"id\": \"systems-depth\",\n      \"name\": \"Distributed Systems Depth\",\n      \"description\": \"Designing reliable distributed systems under real production constraints.\",\n      \"weight\": 50,\n      \"scoringGuide\": {\n        \"high\": \"Owned novel distributed architectures at meaningful scale.\",\n        \"mid\": \"Shipped production services with clear reliability tradeoffs.\",\n        \"low\": \"Only used existing services without design ownership.\"\n      }\n    },\n    {\n      \"id\": \"debugging-rigor\",\n      \"name\": \"Debugging Rigor\",\n      \"description\": \"Finding root causes in ambiguous, multi-layer failures.\",\n      \"weight\": 30,\n      \"scoringGuide\": {\n        \"high\": \"Resolved systemic failures with measured evidence.\",\n        \"mid\": \"Debugged scoped production incidents independently.\",\n        \"low\": \"Provides no concrete debugging evidence.\"\n      }\n    },\n    {\n      \"id\": \"delivery-leverage\",\n      \"name\": \"Technical Delivery Leverage\",\n      \"description\": \"Creating tools or systems that multiply engineering output.\",\n      \"weight\": 20,\n      \"scoringGuide\": {\n        \"high\": \"Built adopted tooling with quantified organization-wide impact.\",\n        \"mid\": \"Automated recurring work for a team.\",\n        \"low\": \"Provides no evidence of reusable leverage.\"\n      }\n    }\n  ],\n  \"tableStakes\": [\n    \"TypeScript\",\n    \"SQL\"\n  ],\n  \"calibrationSummary\": \"Exemplars consistently paired systems ownership with quantified reliability improvements.\"\n}\n\n## Job Description\nBuild and operate distributed recruiting infrastructure.\n\n## Exemplar Resumes\n### Resume 1\nExemplar One\nBuilt a distributed tracing platform used by 12 teams.\n\n---\n\n### Resume 2\nExemplar Two\nRe-architected job processing and cut recovery time by 42%.\n\n## Instructions\n\n### A. Extract patterns\nReturn:\n- commonSkills\n- careerPatterns\n- achievementSignals\n\n### B. Calibrate the rubric\n- Keep 3-4 criteria.\n- Remove any generic criterion that could appear on another role's rubric.\n- Keep at least 60% of total weight on the role's core specialization.\n- Rewrite the scoring guides so the 9-10 band reflects what the exemplar set actually demonstrates.\n- Move non-discriminative skills into tableStakes.\n- Write a concise calibrationSummary explaining what changed and what the model will prioritize.\n\nReturn ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "calibratedRubric": {
+              "additionalProperties": false,
+              "properties": {
+                "calibrationSummary": {
+                  "type": "string"
+                },
+                "criteria": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "description": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "scoringGuide": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "high": {
+                            "type": "string"
+                          },
+                          "low": {
+                            "type": "string"
+                          },
+                          "mid": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "high",
+                          "mid",
+                          "low"
+                        ],
+                        "type": "object"
+                      },
+                      "weight": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "weight",
+                      "scoringGuide"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "tableStakes": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "criteria",
+                "tableStakes",
+                "calibrationSummary"
+              ],
+              "type": "object"
+            },
+            "patterns": {
+              "additionalProperties": false,
+              "properties": {
+                "achievementSignals": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "examples": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "signal": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "signal",
+                      "examples"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "careerPatterns": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "frequency": {
+                        "enum": [
+                          "all",
+                          "most",
+                          "some"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "pattern",
+                      "frequency"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "commonSkills": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "frequency": {
+                        "enum": [
+                          "all",
+                          "most",
+                          "some"
+                        ],
+                        "type": "string"
+                      },
+                      "skill": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "skill",
+                      "frequency"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              },
+              "required": [
+                "commonSkills",
+                "careerPatterns",
+                "achievementSignals"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "patterns",
+            "calibratedRubric"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "calibrateRubric": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "You are refining a scoring rubric based on patterns extracted from exemplar resumes (the recruiter's best hires or top candidates for similar roles).\n\n## Current Rubric\n{\n  \"criteria\": [\n    {\n      \"id\": \"systems-depth\",\n      \"name\": \"Distributed Systems Depth\",\n      \"description\": \"Designing reliable distributed systems under real production constraints.\",\n      \"weight\": 50,\n      \"scoringGuide\": {\n        \"high\": \"Owned novel distributed architectures at meaningful scale.\",\n        \"mid\": \"Shipped production services with clear reliability tradeoffs.\",\n        \"low\": \"Only used existing services without design ownership.\"\n      }\n    },\n    {\n      \"id\": \"debugging-rigor\",\n      \"name\": \"Debugging Rigor\",\n      \"description\": \"Finding root causes in ambiguous, multi-layer failures.\",\n      \"weight\": 30,\n      \"scoringGuide\": {\n        \"high\": \"Resolved systemic failures with measured evidence.\",\n        \"mid\": \"Debugged scoped production incidents independently.\",\n        \"low\": \"Provides no concrete debugging evidence.\"\n      }\n    },\n    {\n      \"id\": \"delivery-leverage\",\n      \"name\": \"Technical Delivery Leverage\",\n      \"description\": \"Creating tools or systems that multiply engineering output.\",\n      \"weight\": 20,\n      \"scoringGuide\": {\n        \"high\": \"Built adopted tooling with quantified organization-wide impact.\",\n        \"mid\": \"Automated recurring work for a team.\",\n        \"low\": \"Provides no evidence of reusable leverage.\"\n      }\n    }\n  ],\n  \"tableStakes\": [\n    \"TypeScript\",\n    \"SQL\"\n  ],\n  \"calibrationSummary\": \"Exemplars consistently paired systems ownership with quantified reliability improvements.\"\n}\n\n## Patterns from Exemplar Resumes\n{\n  \"commonSkills\": [\n    {\n      \"skill\": \"distributed tracing\",\n      \"frequency\": \"all\"\n    },\n    {\n      \"skill\": \"PostgreSQL\",\n      \"frequency\": \"most\"\n    }\n  ],\n  \"careerPatterns\": [\n    {\n      \"pattern\": \"progressed from service ownership to platform architecture\",\n      \"frequency\": \"most\"\n    }\n  ],\n  \"achievementSignals\": [\n    {\n      \"signal\": \"quantified reliability gains\",\n      \"examples\": [\n        \"Reduced incident recovery time by 42%.\"\n      ]\n    }\n  ]\n}\n\n## Job Description (for context)\nBuild and operate distributed recruiting infrastructure.\n\n## Your Task\n\nThe exemplar resumes reveal what \"great\" actually looks like for this role. Use these patterns to sharpen the rubric:\n\n1. **Adjust scoring guides**: Update the high/mid/low descriptions in each criterion to reflect what the exemplar candidates actually demonstrated. Be specific — reference the actual skills, trajectories, and achievements from the exemplars.\n\n2. **Adjust weights**: If the exemplars reveal that certain criteria matter more (or less) than the initial rubric assumed, adjust weights. Weights must still sum to 100.\n\n3. **Add/remove criteria**: If the exemplars reveal a discriminative signal not captured by the current criteria, add it (and remove a less useful one to stay at 3-4 total). If a current criterion doesn't actually discriminate given what the exemplars show, remove it.\n\n4. **Strip generic criteria**: Any criterion that would make sense on a rubric for a different job title MUST be removed or replaced with a role-specific alternative. Generic engineering skills (team leadership, full-stack design, operational excellence, system design, project management, client relationships, scaled operations) are NEVER criteria — move them to table stakes or delete them. At least 60% of total weight must go to the core technical specialization.\n\n5. **Update table stakes**: If the exemplars reveal that a currently-scored criterion is actually table stakes (all exemplars have it, so it doesn't discriminate), move it to table stakes.\n\n6. **Write a calibration summary**: A plain-English explanation (2-4 sentences) of how the exemplar resumes shifted the scoring model. This is shown to the recruiter so they understand what changed.\n\nReturn ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "calibrationSummary": {
+              "type": "string"
+            },
+            "criteria": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "scoringGuide": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "high": {
+                        "type": "string"
+                      },
+                      "low": {
+                        "type": "string"
+                      },
+                      "mid": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "high",
+                      "mid",
+                      "low"
+                    ],
+                    "type": "object"
+                  },
+                  "weight": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "description",
+                  "weight",
+                  "scoringGuide"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "tableStakes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "criteria",
+            "tableStakes",
+            "calibrationSummary"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "extractPatterns": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "You are analyzing 2 resumes of ideal/top-performing candidates for a role. Extract common patterns that define what \"good\" looks like.\n\n## Resumes\n### Resume 1\nExemplar One\nBuilt a distributed tracing platform used by 12 teams.\n\n---\n\n### Resume 2\nExemplar Two\nRe-architected job processing and cut recovery time by 42%.\n\n## Instructions\nAnalyze these resumes and extract:\n\n1. **commonSkills**: Skills that appear across the resumes. Each has \"skill\" (string) and \"frequency\" (\"all\" if in every resume, \"most\" if in majority, \"some\" if in minority).\n2. **careerPatterns**: Common career trajectory patterns. Each has \"pattern\" (string describing the trajectory) and \"frequency\" (\"all\"/\"most\"/\"some\").\n3. **achievementSignals**: Types of achievements that signal quality. Each has \"signal\" (string describing the pattern) and \"examples\" (array of specific examples from the resumes).\n\nReturn ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "achievementSignals": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "examples": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "signal": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "signal",
+                  "examples"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "careerPatterns": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "frequency": {
+                    "enum": [
+                      "all",
+                      "most",
+                      "some"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pattern",
+                  "frequency"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "commonSkills": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "frequency": {
+                    "enum": [
+                      "all",
+                      "most",
+                      "some"
+                    ],
+                    "type": "string"
+                  },
+                  "skill": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "skill",
+                  "frequency"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "commonSkills",
+            "careerPatterns",
+            "achievementSignals"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "generateRubric": {
+    "max_tokens": 4096,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "You are an expert technical recruiter designing a discriminative scoring instrument. Your goal is NOT to restate the job description — the recruiter already knows the role. Your goal is to identify the 3-5 signals that separate the top 5% of candidates from the other 95%.\n\n## Job Description\nBuild and operate distributed recruiting infrastructure.\n\n## Intake Notes\nPrioritize root-cause debugging and measurable platform leverage.\n\n## Your Task\n\nAnalyze this role and produce a scoring rubric with two parts. Read the HARD CONSTRAINTS section carefully before generating any criteria.\n\n### Part 1: Discriminative Criteria (3-4 criteria)\n\nEach criterion must represent a dimension where candidates will MEANINGFULLY DIFFER. These are NOT generic categories like \"technical skills\" or \"experience level\" — they are specific, role-relevant signals.\n\nFor example, for an \"RL Gym Engineer\" role, instead of one \"RL experience\" bucket, you'd create separate criteria for:\n- RL environment design (built gyms from scratch vs. used existing ones)\n- Reward function engineering (designed reward functions vs. applied standard ones)\n- Agent architecture (built autonomous agents vs. fine-tuned existing models)\n\nEach criterion needs:\n- **id**: Short kebab-case identifier (e.g., \"rl-env-design\")\n- **name**: Human-readable name (e.g., \"RL Environment Design & Architecture\")\n- **description**: What this criterion measures and why it's discriminative\n- **weight**: How much this criterion matters relative to others (all criteria weights must sum to 100)\n- **scoringGuide**: Concrete descriptions of what each score range looks like:\n  - **high** (9-10): What the top 5% of candidates look like on this dimension\n  - **mid** (6-8): What an adequate candidate looks like\n  - **low** (1-5): What a weak or missing signal looks like\n\n## HARD CONSTRAINTS (violations = rubric failure)\n- Every criterion MUST be specific to this exact role. Test: if the criterion would make sense on a rubric for a different job title, it fails and must be replaced.\n- Generic engineering skills are NEVER criteria. Team leadership, full-stack design, operational excellence, system design, project management, client relationships, scaled operations — these are table stakes or irrelevant. Never score them.\n- At least 60% of total weight MUST go to the core technical specialization described in the JD and intake notes.\n- Maximum 3-4 criteria. Fewer criteria = less room for filler.\n- Before outputting, self-check: \"Would these exact criteria appear on any other job's rubric?\" If yes, revise until they would not.\n\nRules for criteria:\n- Each criterion should produce a SPREAD of scores across a typical applicant pool. If 80% of applicants would score the same, it's not discriminative.\n- Split broad categories into meaningful sub-specializations when they exist.\n- Weight the criteria by their importance to THIS specific role, not generic importance.\n- Include signals from intake notes that aren't in the JD.\n\n### Part 2: Table Stakes (skills NOT scored)\n\nList skills that are baseline requirements but have NO discriminative value for this role. These are skills that any qualified candidate would have — scoring them just adds noise. Examples: Python/SQL for a data science role, Git for any engineering role, \"communication skills\" for any role.\n\nReturn ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "criteria": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "description": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "scoringGuide": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "high": {
+                        "type": "string"
+                      },
+                      "low": {
+                        "type": "string"
+                      },
+                      "mid": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "high",
+                      "mid",
+                      "low"
+                    ],
+                    "type": "object"
+                  },
+                  "weight": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "description",
+                  "weight",
+                  "scoringGuide"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "tableStakes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "criteria",
+            "tableStakes"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "scorePdf": {
+    "max_tokens": 1500,
+    "messages": [
+      {
+        "content": [
+          {
+            "source": {
+              "data": "JVBERi0xLjQKJSVFT0YK",
+              "media_type": "application/pdf",
+              "type": "base64"
+            },
+            "title": "Candidate resume",
+            "type": "document"
+          },
+          {
+            "text": "Candidate: Avery Fixture. Score this candidate against the criteria in the system prompt. Return ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "criterionScores": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "criterionId": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "criterionId",
+                  "score",
+                  "evidence"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "currentCompany": {
+              "type": "string"
+            },
+            "currentRole": {
+              "type": "string"
+            },
+            "gaps": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "strengths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "criterionScores",
+            "strengths",
+            "gaps",
+            "currentRole",
+            "currentCompany"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "You are scoring a candidate against a recruiting rubric. Be terse — every field has a max length.\n\n## Criteria\n1. **Distributed Systems Depth** (id: \"systems-depth\", weight: 50%)\n- Designing reliable distributed systems under real production constraints.\n- 9-10: Owned novel distributed architectures at meaningful scale.\n- 6-8: Shipped production services with clear reliability tradeoffs.\n- 1-5: Only used existing services without design ownership.\n\n2. **Debugging Rigor** (id: \"debugging-rigor\", weight: 30%)\n- Finding root causes in ambiguous, multi-layer failures.\n- 9-10: Resolved systemic failures with measured evidence.\n- 6-8: Debugged scoped production incidents independently.\n- 1-5: Provides no concrete debugging evidence.\n\n3. **Technical Delivery Leverage** (id: \"delivery-leverage\", weight: 20%)\n- Creating tools or systems that multiply engineering output.\n- 9-10: Built adopted tooling with quantified organization-wide impact.\n- 6-8: Automated recurring work for a team.\n- 1-5: Provides no evidence of reusable leverage.\n\n## What the exemplar resumes demonstrated\nExemplars consistently paired systems ownership with quantified reliability improvements.\n\nCandidates matching these patterns should score higher. Candidates who do NOT match these patterns — especially on skills tagged 'all' frequency — should score significantly lower on the relevant criterion.\n\n## Table Stakes\nTypeScript, SQL\n\n## Rules\n- Score 0-10 (one decimal). 9-10 = exceptional, 6-8 = adequate, 1-5 = weak. If the resume contains no specific, explicit evidence for a criterion, score 3 or below. Do not infer capabilities from job titles or company names alone. \"Works at DeepMind\" is not evidence of RL depth.\n- Apply the scoring guides strictly. Read the 9-10, 6-8, and 1-5 descriptions for each criterion. A score of 9-10 requires the candidate to match the 9-10 description with multiple specific examples. A single mention or bullet point is 6-8 at most. Do not round up.\n- Evidence must cite specific text from the resume — a project name, a metric, a system built, a technique used. If your evidence is generic (e.g., \"has relevant experience\"), your score is too high.\n- Evidence: ONE sentence max. Cite specific facts (job title, company, project, metric). No filler.\n- Strengths/gaps: short phrases, 8-10 words max each.\n- Extract currentRole and currentCompany from the MOST RECENT position in the resume.\n- Do NOT score table-stakes skills.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "scoreText": {
+    "max_tokens": 1500,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "## Candidate Resume\nAvery Fixture\nStaff Engineer, Example Systems\nReduced incident recovery time by 42%.",
+            "type": "text"
+          },
+          {
+            "text": "Candidate: Avery Fixture. Score this candidate against the criteria in the system prompt. Return ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-sonnet-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "criterionScores": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "criterionId": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  },
+                  "score": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "criterionId",
+                  "score",
+                  "evidence"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "currentCompany": {
+              "type": "string"
+            },
+            "currentRole": {
+              "type": "string"
+            },
+            "gaps": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "strengths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "criterionScores",
+            "strengths",
+            "gaps",
+            "currentRole",
+            "currentCompany"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "You are scoring a candidate against a recruiting rubric. Be terse — every field has a max length.\n\n## Criteria\n1. **Distributed Systems Depth** (id: \"systems-depth\", weight: 50%)\n- Designing reliable distributed systems under real production constraints.\n- 9-10: Owned novel distributed architectures at meaningful scale.\n- 6-8: Shipped production services with clear reliability tradeoffs.\n- 1-5: Only used existing services without design ownership.\n\n2. **Debugging Rigor** (id: \"debugging-rigor\", weight: 30%)\n- Finding root causes in ambiguous, multi-layer failures.\n- 9-10: Resolved systemic failures with measured evidence.\n- 6-8: Debugged scoped production incidents independently.\n- 1-5: Provides no concrete debugging evidence.\n\n3. **Technical Delivery Leverage** (id: \"delivery-leverage\", weight: 20%)\n- Creating tools or systems that multiply engineering output.\n- 9-10: Built adopted tooling with quantified organization-wide impact.\n- 6-8: Automated recurring work for a team.\n- 1-5: Provides no evidence of reusable leverage.\n\n## What the exemplar resumes demonstrated\nExemplars consistently paired systems ownership with quantified reliability improvements.\n\nCandidates matching these patterns should score higher. Candidates who do NOT match these patterns — especially on skills tagged 'all' frequency — should score significantly lower on the relevant criterion.\n\n## Table Stakes\nTypeScript, SQL\n\n## Rules\n- Score 0-10 (one decimal). 9-10 = exceptional, 6-8 = adequate, 1-5 = weak. If the resume contains no specific, explicit evidence for a criterion, score 3 or below. Do not infer capabilities from job titles or company names alone. \"Works at DeepMind\" is not evidence of RL depth.\n- Apply the scoring guides strictly. Read the 9-10, 6-8, and 1-5 descriptions for each criterion. A score of 9-10 requires the candidate to match the 9-10 description with multiple specific examples. A single mention or bullet point is 6-8 at most. Do not round up.\n- Evidence must cite specific text from the resume — a project name, a metric, a system built, a technique used. If your evidence is generic (e.g., \"has relevant experience\"), your score is too high.\n- Evidence: ONE sentence max. Cite specific facts (job title, company, project, metric). No filler.\n- Strengths/gaps: short phrases, 8-10 words max each.\n- Extract currentRole and currentCompany from the MOST RECENT position in the resume.\n- Do NOT score table-stakes skills.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "triage": {
+    "max_tokens": 700,
+    "messages": [
+      {
+        "content": [
+          {
+            "text": "## Resume\nAvery Fixture\nStaff Engineer, Example Systems\nReduced incident recovery time by 42%.",
+            "type": "text"
+          },
+          {
+            "text": "Candidate: Avery Fixture. Classify this candidate using the system prompt. Return ONLY a JSON object matching the schema.",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      }
+    ],
+    "model": "claude-haiku-4-5",
+    "output_config": {
+      "format": {
+        "schema": {
+          "additionalProperties": false,
+          "properties": {
+            "bucket": {
+              "enum": [
+                "top_signal",
+                "borderline",
+                "likely_no"
+              ],
+              "type": "string"
+            },
+            "confidence": {
+              "type": "number"
+            },
+            "currentCompany": {
+              "type": "string"
+            },
+            "currentRole": {
+              "type": "string"
+            },
+            "needsFullScore": {
+              "type": "boolean"
+            },
+            "rationale": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "bucket",
+            "confidence",
+            "needsFullScore",
+            "rationale",
+            "currentRole",
+            "currentCompany"
+          ],
+          "type": "object"
+        },
+        "type": "json_schema"
+      }
+    },
+    "system": [
+      {
+        "cache_control": {
+          "type": "ephemeral"
+        },
+        "text": "You are doing a fast first-pass recruiter triage. This is ranking support only. You are NOT auto-rejecting anyone.\n\n## Rubric Summary\n1. Distributed Systems Depth (50%): Designing reliable distributed systems under real production constraints.\n2. Debugging Rigor (30%): Finding root causes in ambiguous, multi-layer failures.\n3. Technical Delivery Leverage (20%): Creating tools or systems that multiply engineering output.\n\n## Table Stakes\nTypeScript, SQL\n\n## What the exemplar resumes demonstrated\nExemplars consistently paired systems ownership with quantified reliability improvements.\n\nCandidates matching these patterns should score higher. Candidates who do NOT match these patterns — especially on skills tagged 'all' frequency — should score significantly lower on the relevant criterion.\n\n## Task\nClassify the candidate into one of three buckets:\n- top_signal: resume already shows strong evidence this candidate merits full scoring\n- borderline: unclear or mixed; still merits full scoring\n- likely_no: currently looks materially weak against the rubric and probably not worth full scoring\n\nRules:\n- Use likely_no only when the resume is clearly weak on the rubric's actual discriminators.\n- If you are uncertain, choose borderline.\n- Do not infer capabilities from company names alone.\n- currentRole/currentCompany must come from the most recent role explicitly shown in the resume.\n- confidence is 0-1.\n- needsFullScore should be true for top_signal and borderline, and false for likely_no unless the case is unusually ambiguous.\n- rationale must be one terse sentence grounded in concrete resume evidence.",
+        "type": "text"
+      }
+    ],
+    "thinking": {
+      "type": "disabled"
+    }
+  }
+}

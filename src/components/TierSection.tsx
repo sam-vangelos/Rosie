@@ -1,0 +1,111 @@
+'use client';
+
+import { Candidate, Tier, ScoringRubric } from '@/lib/types';
+import { CandidateCard } from './CandidateCard';
+import { useState } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface TierSectionProps {
+  tier: Tier;
+  candidates: Candidate[];
+  rubric?: ScoringRubric | null;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
+  onSelectAll: (action: 'select' | 'deselect', ids: string[]) => void;
+  globalRankMap?: Map<string, number>;
+}
+
+const tierConfig = {
+  top: {
+    label: 'Top Tier',
+    scoreRange: '9.0 - 10',
+    description: 'Exceptional match for the role',
+  },
+  strong: {
+    label: 'Strong',
+    scoreRange: '8.0 - 8.9',
+    description: 'Strong candidates worth reviewing',
+  },
+  moderate: {
+    label: 'Moderate',
+    scoreRange: '7.0 - 7.9',
+    description: 'Some gaps but potential fit',
+  },
+  below: {
+    label: 'Below Threshold',
+    scoreRange: '< 7.0',
+    description: 'Does not meet minimum requirements',
+  },
+};
+
+export function TierSection({
+  tier,
+  candidates,
+  rubric,
+  selectedIds,
+  onToggleSelect,
+  onSelectAll,
+  globalRankMap,
+}: TierSectionProps) {
+  const [collapsed, setCollapsed] = useState(tier === 'moderate' || tier === 'below');
+  const config = tierConfig[tier];
+  const tierCandidateIds = candidates.map((c) => c.id);
+  const selectedInTier = tierCandidateIds.filter((id) => selectedIds.has(id));
+  const allSelected = selectedInTier.length === candidates.length && candidates.length > 0;
+
+  if (candidates.length === 0) return null;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => setCollapsed(!collapsed)}
+          className="flex items-center gap-3 group"
+        >
+          <ChevronRight
+            className={cn(
+              'size-4 text-muted-foreground transition-transform',
+              !collapsed && 'rotate-90',
+            )}
+          />
+          <div className="flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ backgroundColor: `var(--tier-${tier})` }}
+            />
+            <h2 className="text-lg font-semibold text-foreground group-hover:text-muted-foreground transition-colors">
+              {config.label}
+            </h2>
+            <span className="text-sm text-muted-foreground">({config.scoreRange})</span>
+          </div>
+          <span className="text-sm text-muted-foreground">{candidates.length} candidates</span>
+        </button>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onSelectAll(allSelected ? 'deselect' : 'select', tierCandidateIds)}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {allSelected ? 'Deselect All' : 'Select All'}
+          </button>
+        </div>
+      </div>
+
+      {!collapsed && (
+        <div className="space-y-2 pl-7">
+          {candidates.map((candidate) => (
+            <CandidateCard
+              key={candidate.id}
+              candidate={candidate}
+              rank={globalRankMap?.get(candidate.id) || 0}
+              rubric={rubric}
+              selected={selectedIds.has(candidate.id)}
+              onSelect={onToggleSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
